@@ -72,10 +72,28 @@ ERROR_CODE_NAMES = {
     205: "START_OCCUPIED",
     206: "GOAL_OCCUPIED",
     208: "NO_VALID_PATH",
+    101: "INVALID_CONTROLLER",
+    102: "TF_ERROR",
+    103: "INVALID_PATH",
     104: "PATIENCE_EXCEEDED",
     105: "FAILED_TO_MAKE_PROGRESS",
     106: "NO_VALID_CONTROL",
+    107: "CONTROLLER_TIMED_OUT",
 }
+
+#: THE NOTE FOR A CHAIN THIS ADAPTER COULD NOT BUILD A PATH FOR
+#: (SPEC_ADAPTER.md AMENDMENTS 9). It is a BLOCKED and not a warning
+#: because the two things that produce it are permanent: a corner too
+#: tight to round at the truck's own turning radius, and a reversal in
+#: the middle of a granted polyline. Re-sending the same route would
+#: refuse the same way for ever, so the fleet is told once and gets to
+#: requeue the order somewhere else.
+#:   THE ARITHMETIC IS IN THE LOG AND NOT ON THE WIRE, which is this
+#: file's own rule: `/auto/state.note` is one sentence an operator reads
+#: at a glance and the numbers that produced it are on the adapter's own
+#: line at the same instant (nav2_adapter_node._send_chain).
+CHAIN_REFUSED_NOTE = ("blocked: the granted polyline cannot be driven as "
+                      "a path - see the adapter log for which corner")
 
 
 class ClosingWatch(object):

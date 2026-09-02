@@ -71,6 +71,7 @@ import follower                                           # noqa: E402
 import nav2_cmd                                           # noqa: E402
 import nav2_envelope                                      # noqa: E402
 import nav2_legs                                          # noqa: E402
+import nav2_path                                          # noqa: E402
 import nav2_pose                                          # noqa: E402
 import nav2_state                                         # noqa: E402
 import nav2_watch                                         # noqa: E402
@@ -190,9 +191,23 @@ def wiring(cfg, vid):
         # at. Absolute in config and already carrying the truck.
         Wire("pub", "speed_limit", "nav2_msgs/SpeedLimit",
              cfg.s("topics.speed_limit"), 10, False),
-        # ---- and the one action ----
+        # ---- and the two actions ----
         Wire("action", "navigate", "nav2_msgs/NavigateToPose",
              "navigate_to_pose", 0, False),
+        # THE SECOND ONE IS THE WHOLE OF AMENDMENTS 9. A ring chain is
+        # not a pose for bt_navigator to plan to - it is the polyline the
+        # traffic ledger already granted, rounded at the truck's own
+        # turning radius and densified, sent straight to the
+        # controller_server. NavigateToPose is still what a MANOEUVRE
+        # goes out on (the spur exit and the station spur), because a
+        # bay and a dead-end spur are the freespace problems a planner is
+        # actually for.
+        #   RELATIVE, LIKE EVERY OTHER ADDRESS HERE: truck.sh puts this
+        # child under /<vid>, so this is /<vid>/follow_path - the name
+        # nav2_controller advertises inside the same namespace as
+        # /<vid>/navigate_to_pose.
+        Wire("action", "follow", "nav2_msgs/FollowPath",
+             "follow_path", 0, False),
     ) + (
         # Named here so --selftest can print what the fleet layer
         # believes these resolve to, beside what this node asked for.
@@ -315,9 +330,18 @@ class Adapter(object):
         # truck.sh hands bt_navigator as `default_nav_to_pose_bt_xml`.
         # Every goal this node builds names its tree, so the default is
         # never reached - MPPI stays configured and unnamed.
+        #   AND ONE ROW NAMES NO TREE AT ALL SINCE AMENDMENTS 9. The
+        # ring chain is a `nav2_msgs/FollowPath` straight at the
+        # controller_server, so there is no behaviour tree in its path -
+        # its controller and its goal checker travel on the goal itself
+        # (nav2_legs.CHAIN_CONTROLLER_ID). The None is skipped BY NAME
+        # here rather than by the table omitting the class, so
+        # controller_for() still answers for everything plan_legs can
+        # build.
         self.trees = dict(
             (key, os.path.join(_donors.REPO, cfg.s(key)))
-            for _controller, key in nav2_legs.CLASS_TREE.values())
+            for _controller, key in nav2_legs.CLASS_TREE.values()
+            if key is not None)
         self.command_timeout_s = cfg.f("navcmd.command_timeout_s")
         self.required_closing_m = cfg.f("nav.watchdog.required_closing_m")
         self.closing_allowance_s = cfg.f("nav.watchdog.closing_allowance_s")
@@ -362,7 +386,12 @@ class Adapter(object):
         self.pending_leg = None
         self.ticks = 0
         self.pubs = {}
-        self.action = None
+        #: THE TWO GOAL SERVERS, KEYED BY THE WIRING TABLE'S OWN LABEL
+        #: (AMENDMENTS 9). It is a dict and not two fields so that a row
+        #: added to `wiring` is a client that exists, and a class that
+        #: names a server the table does not carry is a KeyError at the
+        #: dispatch it belongs to rather than an AttributeError anywhere.
+        self.actions = {}
 
     # -------------------------- construction --------------------------
 
@@ -379,7 +408,7 @@ class Adapter(object):
                     getattr(self, "cb_" + row.label),
                     self.msgs.qos(row.depth, row.latched))
             elif row.kind == "action":
-                self.action = self.msgs.action_client(
+                self.actions[row.label] = self.msgs.action_client(
                     self.node, self.msgs.type_of(row.msg), row.address)
         self.node.create_timer(1.0 / TICK_HZ, self.tick)
 
@@ -675,6 +704,9 @@ class Adapter(object):
         if not self.legs:
             return
         leg = self.legs[index]
+        if leg.klass == nav2_legs.RING_CHAIN:
+            self._send_chain(index, current_yaw)
+            return
         if current_yaw is None and leg.klass == nav2_legs.TRANSIT:
             # NO PICTURE, NO GOAL. Every door reads the live estimate
             # first and the route is HELD while the belief is gone, so
@@ -723,7 +755,95 @@ class Adapter(object):
             stamp=self.node.get_clock().now().to_msg(),
             map_pose=self.frame.to_map(leg.goal[0], leg.goal[1], goal_yaw),
             behavior_tree=self.trees[leg.tree_key])
-        future = self.action.send_goal_async(goal)
+        future = self.actions["navigate"].send_goal_async(goal)
+        future.add_done_callback(
+            lambda done, gen=generation: self._on_accepted(done, gen))
+
+    def _send_chain(self, index, current_yaw):
+        """One FollowPath goal carrying the path this adapter built.
+
+        SPEC_ADAPTER.md AMENDMENTS 9. Everything that used to happen
+        between a bay mouth and a spur foot - a goal per turn, an
+        alignment goal to open each long one, a preemption at every
+        boundary, and Smac re-deciding the whole corridor on every replan
+        - is this one message.
+
+        THE SENSE IS RESOLVED HERE AND ONCE. nav2_legs.chain_sense asks
+        D7's own comparison of the truck's CURRENT yaw against the
+        chain's FIRST segment, and the answer is spent on every
+        orientation down the path. Run 16 asked that question again on
+        every replan at a goal far enough that both answers cost the
+        same, and the body twist changed sign fourteen times in thirty
+        seconds; there is nothing left here to re-ask it.
+
+        AND THE PATH IS IN map, THROUGH THE SAME REGISTRATION THE GOALS
+        GO THROUGH. RPP's path handler transforms the plan into the
+        truck's base frame itself and prunes what falls outside the local
+        costmap, so a forty-metre path is not a problem - but the frame
+        on the header has to be one tf can reach, and the adapter's own
+        world coordinates are not.
+
+        A PATH THIS FILE CANNOT BUILD IS A BLOCKED WITH A REASON, never
+        a silent stop: nav2_legs and nav2_path refuse a corner too tight
+        to round or a polyline with a reversal in it BY NAME, and the
+        operator gets the name.
+        """
+        leg = self.legs[index]
+        world = self._world_xy()
+        if current_yaw is None or world is None:
+            # NO PICTURE, NO PATH - the transit branch's rule, for the
+            # same reason twice over: the chain's sense is D7's
+            # comparison against the truck's own yaw, and the head of
+            # the path is where the truck is STANDING (nav2_path.trim_to
+            # - RPP searches 2.00 m of a fresh plan and no further).
+            # Held and not BLOCKED, because the ClosingWatch _advance_to
+            # deliberately leaves running is the backstop that reports a
+            # belief which never comes back.
+            self.node.get_logger().warn(
+                "leg {}/{} ring chain not sent: no believed pose to "
+                "build a path from".format(index + 1, len(self.legs)))
+            return
+        try:
+            built = nav2_legs.chain_path(leg, current_yaw, start_xy=world)
+        except (nav2_legs.Nav2LegsError, nav2_path.Nav2PathError) as exc:
+            self.node.get_logger().warn(
+                "leg {}/{} ring chain NOT SENT: {}".format(
+                    index + 1, len(self.legs), exc))
+            self.state.block(nav2_watch.CHAIN_REFUSED_NOTE)
+            return
+        self.leg_i = index
+        self.generation += 1
+        generation = self.generation
+        self.watch = nav2_watch.ClosingWatch(self.required_closing_m,
+                                             self.closing_allowance_s)
+        # THE CHAIN TABLE, ON THE RECORD, AND IT IS THE LEG TABLE'S JOB
+        # DONE FOR A DIFFERENT SHAPE. A goal that has left carries one
+        # pose an operator can read back off the wire; a path carries
+        # four hundred and none of them is the decision. So the line
+        # quotes the four numbers that ARE the decision - how long, how
+        # many poses, how many corners were rounded, and which sense was
+        # chosen - beside the speed at dispatch that AMENDMENTS 8 made
+        # the leg table carry.
+        self.node.get_logger().info(
+            "leg {}/{} ring chain follow_path end=({:.2f}, {:.2f}) "
+            "head=({:.2f}, {:.2f}) len={:.2f} poses={} corners={} "
+            "dropped={} sense={} truck_yaw={} v={:+.3f}".format(
+                index + 1, len(self.legs), leg.end[0], leg.end[1],
+                built.poses[0][0], built.poses[0][1],
+                built.length_m, len(built.poses), built.corners,
+                built.dropped, nav2_path.sense_name(built.flipped),
+                "none" if current_yaw is None
+                else "{:+.3f}".format(current_yaw),
+                self.body_twist[0]))
+        goal = self.msgs.chain_goal(
+            frame_id=self.map_frame,
+            stamp=self.node.get_clock().now().to_msg(),
+            map_poses=[self.frame.to_map(x, y, yaw)
+                       for x, y, yaw in built.poses],
+            controller_id=nav2_legs.CHAIN_CONTROLLER_ID,
+            goal_checker_id=nav2_legs.CHAIN_GOAL_CHECKER_ID,
+            progress_checker_id=nav2_legs.CHAIN_PROGRESS_CHECKER_ID)
+        future = self.actions["follow"].send_goal_async(goal)
         future.add_done_callback(
             lambda done, gen=generation: self._on_accepted(done, gen))
 
@@ -946,9 +1066,9 @@ def _messages():
     """
     import rclpy                                          # noqa: F401
     from action_msgs.msg import GoalStatus
-    from geometry_msgs.msg import Twist
-    from nav_msgs.msg import Odometry
-    from nav2_msgs.action import NavigateToPose
+    from geometry_msgs.msg import PoseStamped, Twist
+    from nav_msgs.msg import Odometry, Path
+    from nav2_msgs.action import FollowPath, NavigateToPose
     from nav2_msgs.msg import SpeedLimit
     from rclpy.action import ActionClient
     from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -964,6 +1084,7 @@ def _messages():
         "tf2_msgs/TFMessage": TFMessage,
         "nav2_msgs/SpeedLimit": SpeedLimit,
         "nav2_msgs/NavigateToPose": NavigateToPose,
+        "nav2_msgs/FollowPath": FollowPath,
     }
 
     class Messages(object):
@@ -1034,6 +1155,43 @@ def _messages():
             goal.pose.pose.orientation.w = math.cos(map_pose[2] / 2.0)
             return goal
 
+        def chain_goal(self, frame_id, stamp, map_poses, controller_id,
+                       goal_checker_id, progress_checker_id):
+            """One `nav2_msgs/FollowPath` goal (AMENDMENTS 9).
+
+            ALL THREE IDS ARE NAMED. nav2_controller falls back on "the
+            only plugin loaded" for each of them and this stack loads
+            two goal checkers, so an unnamed one aborts every chain -
+            AMENDMENTS 2 read that branch out of the binary and paid for
+            it once already. The progress checker is named for the same
+            reason even though only one is declared: the fallback is a
+            property of today's config, not of the contract.
+
+            EVERY POSE CARRIES THE SAME STAMP AND THE SAME FRAME. RPP's
+            path handler transforms the whole plan through ONE lookup of
+            the robot's pose in the plan's frame (path_handler.cpp), so
+            per-pose stamps buy nothing and a mixture would be a plan
+            whose two halves were true at different instants.
+            """
+            goal = FollowPath.Goal()
+            goal.controller_id = controller_id
+            goal.goal_checker_id = goal_checker_id
+            goal.progress_checker_id = progress_checker_id
+            path = Path()
+            path.header.frame_id = frame_id
+            path.header.stamp = stamp
+            for map_pose in map_poses:
+                pose = PoseStamped()
+                pose.header.frame_id = frame_id
+                pose.header.stamp = stamp
+                pose.pose.position.x = map_pose[0]
+                pose.pose.position.y = map_pose[1]
+                pose.pose.orientation.z = math.sin(map_pose[2] / 2.0)
+                pose.pose.orientation.w = math.cos(map_pose[2] / 2.0)
+                path.poses.append(pose)
+            goal.path = path
+            return goal
+
         def result_of(self, result):
             code = getattr(result.result, "error_code", -1)
             return result.status, code
@@ -1079,9 +1237,9 @@ def _selftest(args):
             print("FAIL  Adapter has no cb_{}".format(label))
     print("remaps truck.sh puts on this child: {}".format(
         " ".join("-r {}:={}".format(a, b) for a, b in NS_REMAPS)))
-    print("cores: state={} legs={} cmd={} pose={} watch={}".format(
-        nav2_state.__name__, nav2_legs.__name__, nav2_cmd.__name__,
-        nav2_pose.__name__, nav2_watch.__name__))
+    print("cores: state={} legs={} path={} cmd={} pose={} watch={}".format(
+        nav2_state.__name__, nav2_legs.__name__, nav2_path.__name__,
+        nav2_cmd.__name__, nav2_pose.__name__, nav2_watch.__name__))
     print("{} rows, {} problems".format(len(rows), len(fails)))
     return 1 if fails else 0
 

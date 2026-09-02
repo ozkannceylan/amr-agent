@@ -15,6 +15,7 @@ import route
 from stations import STATIONS
 
 import nav2_legs
+import nav2_path
 
 
 F1_SPAWN = (-17.0, 10.0)
@@ -44,14 +45,14 @@ def test_the_planner_hands_over_a_doubled_first_point():
     assert poly[0] == poly[1] == F1_SPAWN
 
 
-def test_spawn_to_s5_is_a_transit_and_a_spur():
+def test_spawn_to_s5_is_a_chain_and_a_spur():
     legs = nav2_legs.plan_legs(_plan(F1_SPAWN, "S5"))
     assert len(legs) == 2
     assert legs[0].points[0] == F1_SPAWN
     assert legs[0].points[-1] == (7.0, 10.0)        # the S5 spur foot
     assert legs[1].points == [(7.0, 10.0), (7.0, 4.25)]
     assert [leg.klass for leg in legs] == [
-        nav2_legs.TRANSIT, nav2_legs.STATION_SPUR]
+        nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR]
     assert [leg.final for leg in legs] == [False, True]
 
 
@@ -64,40 +65,33 @@ def test_the_ring_run_is_one_leg_and_not_eight_goals():
     assert {p[1] for p in legs[0].points} == {10.0}
 
 
-def test_s5_to_s9_splits_at_every_junction_turn():
-    """Every junction, and since D12 every long leg AFTER one.
+def test_s5_to_s9_is_one_chain_out_of_the_bay_and_a_spur():
+    """THE SHAPE OF EVERY ROUTE SINCE AMENDMENTS 9, on its worst case.
 
-    The three ring legs are 7.0, 20.0 and 17.0 m, all clear of
-    SPLIT_ABOVE_M, and each is entered off a right angle - so each is
-    opened by its own ALIGN_M alignment leg. The spur exit that starts
-    the route is not (it is not a transit) and neither is the station
-    spur that ends it.
+    S5 to S9 turns THREE times - out of the north leg at (0, 10), out of
+    the spine at (0, -10) and along the south leg - and before this
+    ruling that was eight goals: a spur exit, three alignment legs,
+    three transits and a station spur, with a preemption or a stop at
+    every one of the seven boundaries. It is now three objects and two
+    boundaries, and the middle one is a single 44 m path.
     """
     start = (7.0, 4.25)
     legs = nav2_legs.plan_legs(_plan(start, "S9"))
-    a = nav2_legs.ALIGN_M
-    # APPROX AND NOT EQUALITY, since AMENDMENTS 8: two of these three
-    # heads are interpolated PAST a collinear vertex (the ring legs
-    # carry a node every 3.00-4.00 m and ALIGN_M is 4.51), so the
-    # arithmetic that places them is a walk and not one multiply.
-    assert _flat(leg.points[0] for leg in legs) == pytest.approx(_flat([
-        (7.0, 4.25),
-        (7.0, 10.0), (7.0 - a, 10.0),
-        (0.0, 10.0), (0.0, 10.0 - a),
-        (0.0, -10.0), (-a, -10.0),
-        (-17.0, -10.0)]))
-    assert _flat(leg.points[-1] for leg in legs) == pytest.approx(_flat([
-        (7.0, 10.0),
-        (7.0 - a, 10.0), (0.0, 10.0),
-        (0.0, 10.0 - a), (0.0, -10.0),
-        (-a, -10.0), (-17.0, -10.0),
-        (-17.0, -14.9)]))
     assert [leg.klass for leg in legs] == [
-        nav2_legs.SPUR_EXIT,
-        nav2_legs.ALIGN, nav2_legs.TRANSIT,
-        nav2_legs.ALIGN, nav2_legs.TRANSIT,
-        nav2_legs.ALIGN, nav2_legs.TRANSIT,
-        nav2_legs.STATION_SPUR]
+        nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR]
+    assert _flat(leg.points[0] for leg in legs) == pytest.approx(_flat([
+        (7.0, 4.25), (-17.0, -10.0)]))
+    assert _flat(leg.points[-1] for leg in legs) == pytest.approx(_flat([
+        (-17.0, -10.0), (-17.0, -14.9)]))
+    # THE CHAIN KEEPS EVERY GRANTED VERTEX, including the collinear ones
+    # it drives straight through: the corridor is the ledger's and this
+    # file does not get to simplify it.
+    chain = legs[0]
+    assert chain.points[0] == (7.0, 4.25)
+    assert (7.0, 10.0) in chain.points          # the mouth, now a corner
+    assert (0.0, 10.0) in chain.points and (0.0, -10.0) in chain.points
+    assert nav2_legs.leg_length_m(chain.points) == pytest.approx(
+        5.75 + 7.0 + 20.0 + 17.0)
 
 
 def test_the_spur_foot_splits_even_when_the_run_is_straight():
@@ -111,7 +105,7 @@ def test_the_spur_foot_splits_even_when_the_run_is_straight():
     assert len(poly) == 3 and poly[1] == (7.0, 10.0)
     legs = nav2_legs.plan_legs(poly)
     assert len(legs) == 2
-    assert legs[0].klass == nav2_legs.TRANSIT
+    assert legs[0].klass == nav2_legs.RING_CHAIN
     assert legs[1].klass == nav2_legs.STATION_SPUR
     # ... AND THE SAME RUN FROM 0.20 m OUT IS ONE LEG, because a run
     # shorter than the hand-over distance is not a leg at all (D9). It
@@ -161,14 +155,20 @@ def test_a_leg_that_starts_on_a_station_is_the_dead_astern_leg():
     # The truck parked at S5 with 0.18 m of arrival error still counts
     # as standing on the station: it is the pose it will back out of.
     start = (7.0, 4.43)
-    legs = nav2_legs.plan_legs(_plan(start, "S1"))
+    legs = [_leg(nav2_legs.classify(points, final=False), points)
+            for points in nav2_legs.split_legs(_plan(start, "S1"))[:1]]
     assert legs[0].klass == nav2_legs.SPUR_EXIT
 
 
 def test_a_leg_that_starts_a_metre_off_a_station_is_a_transit():
     start = (7.0, 5.4)
-    legs = nav2_legs.plan_legs(_plan(start, "S1"))
-    assert legs[0].klass == nav2_legs.TRANSIT
+    chunks = nav2_legs.split_legs(_plan(start, "S1"))
+    # classify() is asked directly, because a transit in the middle of a
+    # route is now swallowed by the ring chain (AMENDMENTS 9) and the
+    # question this test asks is classify()'s and not plan_legs's.
+    assert nav2_legs.classify(chunks[0], final=False) == nav2_legs.TRANSIT
+    assert nav2_legs.plan_legs(_plan(start, "S1"))[0].klass \
+        == nav2_legs.RING_CHAIN
 
 
 def test_the_station_at_a_point_is_none_off_the_floor():
@@ -194,7 +194,16 @@ def test_the_table_names_only_controllers_nav2_yaml_declares():
     for klass, (controller, tree_key) in nav2_legs.CLASS_TREE.items():
         assert controller in drive_goal.CONTROLLER_TREE, klass
         donor_key = drive_goal.CONTROLLER_TREE[controller]
-        if klass == nav2_legs.STATION_SPUR:
+        if klass == nav2_legs.RING_CHAIN:
+            # THE ONE ROW WITH NO TREE, and it is a statement rather
+            # than a gap: a chain is a FollowPath straight at the
+            # controller_server and there is no BT XML in the path
+            # (AMENDMENTS 9). What a tree used to carry it names on the
+            # goal.
+            assert tree_key is None
+            assert nav2_legs.CHAIN_CONTROLLER_ID == "FollowPathRPP"
+            assert nav2_legs.CHAIN_GOAL_CHECKER_ID == "general_goal_checker"
+        elif klass == nav2_legs.STATION_SPUR:
             assert tree_key == "nav.bt_xml_station"
             assert donor_key == "nav.bt_xml_rpp"
         else:
@@ -240,36 +249,43 @@ def test_no_leg_class_names_mppi_while_the_controller_stays_configured():
     assert drive_goal.DEFAULT_CONTROLLER == "mppi"
 
 
-def test_the_only_tree_change_left_in_a_route_is_into_the_station_spur():
-    """WHAT AMENDMENTS 4 DID TO THE LEG BOUNDARIES, stated as a
-    property over the whole floor rather than over one fixture.
+def test_no_boundary_in_a_route_is_a_preemption_any_more():
+    """WHAT AMENDMENTS 9 DID TO THE LEG BOUNDARIES, over the whole floor.
 
-    The adapter has two doors between legs (nav2_adapter_node._advance_to):
-    same tree is a TRUE PREEMPTION and the truck never stops; a
-    different tree is nav2's own instruction - cancel, wait for the
-    result, send - and the truck decelerates into the boundary. With
-    the transit row on the RPP tree the ONLY tree change left in any
-    route is the last one, into the bay. The spur-exit -> transit
-    boundary - which used to cost a full stop at every undock - is now
-    a preemption.
+    AMENDMENTS 4 left exactly one tree change per route - the last one,
+    into the bay - and every other boundary was a true preemption at P.
+    There are no other boundaries now. A route is a spur exit, a chain
+    and a station spur; the spur exit is DRIVEN TO ITS GOAL (D10) and so
+    is the chain (it is on a different action server), so every leg in
+    every route finishes on its own server before the next one is sent.
+      THE PREEMPTION MACHINERY IS NOT DELETED and this test is not a
+    claim that it should be: PREEMPT_AT_M, should_preempt and both of
+    _advance_to's doors are still the contract, and the day a class
+    earns a hand-over at P again they are what it is built on. What this
+    test says is that TODAY nothing on this floor takes one, which is
+    why run 16's nine preemptions become zero and why the two-sense tie
+    at a quarter turn has nowhere left to happen.
     """
+    three = (nav2_legs.SPUR_EXIT, nav2_legs.RING_CHAIN,
+             nav2_legs.STATION_SPUR)
     for station_id in sorted(STATIONS):
-        legs = nav2_legs.plan_legs(_plan(F1_SPAWN, station_id))
-        changes = [i for i in range(1, len(legs))
-                   if legs[i].tree_key != legs[i - 1].tree_key]
-        assert changes in ([], [len(legs) - 1]), (station_id, changes)
-        if changes:
-            assert legs[changes[0]].klass == nav2_legs.STATION_SPUR
-    # and the undock shape, which is the one that changed: out of S1's
-    # bay, up the spur, then east along the ring - one tree throughout.
-    # THREE LEGS SINCE D12 AND STILL ONE TREE, which is the claim this
-    # test makes: the alignment leg was given the transit's own row
-    # precisely so that adding it costs no cancel.
+        for origin in (F1_SPAWN, (-13.0, 4.25), (7.0, 4.25)):
+            if nav2_legs.station_at(origin) == station_id:
+                continue                     # a route to where you are
+            legs = nav2_legs.plan_legs(_plan(origin, station_id))
+            assert all(leg.klass in three for leg in legs), \
+                (station_id, [leg.klass for leg in legs])
+            for index in range(1, len(legs)):
+                assert not nav2_legs.drives_through(
+                    legs[index - 1], legs[index]), (station_id, index)
+                assert nav2_legs.runs_to_its_goal(legs[index - 1]), \
+                    (station_id, index)
+    # and the undock shape, which is the one this ruling changed: out of
+    # S1's bay, up the spur, then east along the ring. ONE object since
+    # D15, so there is no boundary in it at all.
     out = nav2_legs.plan_legs([(-13.0, 4.25), (-13.0, 10.0), (0.0, 10.0)])
-    assert [leg.klass for leg in out] == [nav2_legs.SPUR_EXIT,
-                                          nav2_legs.ALIGN,
-                                          nav2_legs.TRANSIT]
-    assert {leg.tree_key for leg in out} == {"nav.bt_xml_rpp"}
+    assert [leg.klass for leg in out] == [nav2_legs.RING_CHAIN]
+    assert [leg.tree_key for leg in out] == [None]
 
 
 # ----------------------------------------------------------------------
@@ -328,11 +344,22 @@ def test_the_only_tree_change_left_in_a_route_is_into_the_station_spur():
 # plan and the planner may choose a driving direction freely.
 # ----------------------------------------------------------------------
 
+def _leg(klass, points=((0.0, 0.0), (5.0, 0.0)), final=False):
+    """A bare leg of one class, for the questions that need no route."""
+    controller, tree_key = nav2_legs.controller_for(klass)
+    points = [tuple(p) for p in points]
+    return nav2_legs.Leg(points=points, start=points[0], end=points[-1],
+                         goal=nav2_legs.goal_point(points[-1], klass),
+                         klass=klass, controller=controller,
+                         tree_key=tree_key, final=final)
+
+
 def test_two_legs_of_one_tree_drive_through_the_boundary():
-    legs = nav2_legs.plan_legs(_plan(F1_SPAWN, "S9"))
-    pair = [(legs[i], legs[i + 1]) for i in range(len(legs) - 1)
-            if legs[i].klass == nav2_legs.TRANSIT
-            and legs[i + 1].klass == nav2_legs.TRANSIT][0]
+    # NO ROUTE ON THIS FLOOR STILL CONTAINS SUCH A PAIR (AMENDMENTS 9
+    # collapsed the ring into one chain), so the rule is asked of the
+    # table directly. It is still the contract: the day a class earns a
+    # hand-over at P again, THIS is what decides which door it takes.
+    pair = (_leg(nav2_legs.TRANSIT), _leg(nav2_legs.TRANSIT))
     assert nav2_legs.drives_through(*pair)
 
 
@@ -344,42 +371,51 @@ def test_a_tree_change_never_drives_through():
 
 
 def test_a_bay_mouth_is_not_handed_over_at_all_but_driven_to():
-    """D10, second cut. The two legs share a tree since AMENDMENTS 4, so
-    nav2 has no objection to this boundary at all - which is exactly why
-    the refusal has to be ours, and why it cannot be a door: BOTH doors
-    hand over at P with the truck still moving."""
+    """D10, third cut. The refusal is ours and it is still ours.
+
+    Under AMENDMENTS 4 the two legs shared a tree, so nav2 had no
+    objection to this boundary at all - which was exactly why the
+    refusal had to be ours. Under AMENDMENTS 9 the leg after the mouth
+    is a chain on a DIFFERENT SERVER, so nav2 could not preempt it even
+    if we asked. D10 still stands on its own feet: the mouth is driven
+    to its goal because a quarter turn must not be taken at 0.30 m/s,
+    and that sentence does not depend on which door happens to exist.
+    """
     out = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
-    assert out[0].klass == nav2_legs.SPUR_EXIT
-    assert out[0].tree_key == out[1].tree_key
-    assert nav2_legs.drives_through(out[0], out[1])
-    # ... and it is never asked, because the leg is never handed over
+    assert out[0].klass == nav2_legs.RING_CHAIN
+    assert out[1].klass == nav2_legs.STATION_SPUR
+    assert not nav2_legs.drives_through(out[0], out[1])
+    # ... and no door is ever asked for, because the leg is never
+    # handed over at all.
     assert nav2_legs.runs_to_its_goal(out[0])
     assert not nav2_legs.should_preempt(
         0.01, nav2_legs.runs_to_its_goal(out[0]))
+    # AND THE MOUTH IS NOT A BOUNDARY ANY MORE (D15): it is a rounded
+    # corner in the middle of one path, so the quarter turn D10 refused
+    # to take at speed is now an arc at the truck's own radius.
+    assert (-13.0, 10.0) in out[0].points
+    assert (-13.0, 10.0) != out[0].end
 
 
-def test_the_undock_route_stops_exactly_twice():
-    """THE WHOLE ROUTE OUT OF A BAY, leg by leg.
+def test_the_undock_route_is_two_objects_and_stops_at_both():
+    """THE WHOLE ROUTE OUT OF A BAY, leg by leg, since D15.
 
-    The mouth is driven to (D10) and the bay at the far end is driven
-    to because it is final. NOTHING ELSE STOPS - AMENDMENTS 8 took the
-    alignment leg's stop away, because a leg that stops can stop in the
-    middle of its own turn and run 15 measured it doing exactly that.
-    Every other leg, alignment legs included, hands over at P.
+    The chain is driven to its own end because it lives on another
+    action server, and the bay is driven to because it is final. TWO
+    STOPS, against run 16's five goals and three lost legs, and against
+    the first cut of AMENDMENTS 9's three - the mouth stop is gone with
+    the mouth goal (D15).
     """
     legs = nav2_legs.plan_legs(route.plan_route((-13.0, 4.25), "S9"))
+    assert [leg.klass for leg in legs] == [
+        nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR]
     driven = [nav2_legs.runs_to_its_goal(leg) for leg in legs]
-    assert driven[0] is True                 # the mouth (D10)
-    assert driven[-1] is True                # the bay (it is final)
-    assert driven.count(True) == 2, [leg.klass for leg in legs]
-    for leg, stops in zip(legs, driven):
-        if leg.klass in (nav2_legs.TRANSIT, nav2_legs.ALIGN) \
-                and not leg.final:
-            assert stops is False, leg.end
-    # AND THE LONG LEGS ARE STILL THE MAJORITY OF THE DRIVING: the
-    # alignment legs cost ALIGN_M each and nothing else.
-    handed = [leg for leg, stops in zip(legs, driven) if not stops]
-    assert len(handed) >= 2
+    assert driven == [True, True]
+    # AND THE CHAIN IS THE DRIVING. The one manoeuvre left is 4.90 m of
+    # spur into S9's bay; the chain is the other thirty-five.
+    lengths = [nav2_legs.leg_length_m(leg.points) for leg in legs]
+    assert lengths[0] == pytest.approx(5.75 + 10.0 + 20.0)
+    assert lengths[1] == pytest.approx(4.9)
 
 
 def test_an_unknown_leg_class_is_refused_by_name():
@@ -391,9 +427,10 @@ def test_an_unknown_leg_class_is_refused_by_name():
 
 def test_every_leg_carries_its_controller_and_its_tree_key():
     legs = nav2_legs.plan_legs(_plan(F1_SPAWN, "S5"))
-    # AMENDMENTS 4: the transit leg carries rpp and the RPP tree now.
+    # AMENDMENTS 4 put every class on rpp; AMENDMENTS 9 gave the chain
+    # no tree at all, because it does not pass bt_navigator.
     assert legs[0].controller == "rpp"
-    assert legs[0].tree_key == "nav.bt_xml_rpp"
+    assert legs[0].tree_key is None
     assert legs[1].controller == "rpp"
     assert legs[1].tree_key == "nav.bt_xml_station"
 
@@ -439,8 +476,8 @@ def test_a_transit_leg_ends_pointing_along_its_last_segment():
     # ... FOR A TRUCK ALREADY POINTING THAT WAY. Since D7 the transit
     # row is bidirectional and the truck's own yaw picks the half; the
     # section at the bottom of this file is where that is pinned.
-    legs = nav2_legs.plan_legs(_plan(F1_SPAWN, "S5"))
-    leg = legs[0]
+    leg = _leg(nav2_legs.TRANSIT, nav2_legs.split_legs(
+        _plan(F1_SPAWN, "S5"))[0])
     want = math.atan2(leg.end[1] - leg.points[-2][1],
                       leg.end[0] - leg.points[-2][0])
     assert nav2_legs.leg_yaw(leg, want) == want
@@ -586,16 +623,38 @@ def _leg_ending_at(legs, point):
     return matches[0]
 
 
+def _exit_chunk(polyline):
+    """The bay-to-mouth chunk of a route, as split_legs still cuts it.
+
+    SINCE DEFECT D15 THE CHAIN SWALLOWS IT (m6_ver2/logs/run17-c8-session-a
+    - a chain dispatched to a truck standing across it is a curvature
+    demand four times what the truck can meet, and the truck orbited).
+    The CHUNK is still cut here, and it is still what says the route
+    leaves a bay; what changed is that the mouth is now a rounded corner
+    inside one path instead of a goal at a boundary. D5's heading rule
+    is asked of the chunk, which is where it always lived.
+    """
+    chunks = nav2_legs.split_legs(polyline)
+    return _leg(nav2_legs.classify(chunks[0], final=len(chunks) == 1),
+                chunks[0], final=len(chunks) == 1)
+
+
 def test_the_real_exit_out_of_a_bay_is_the_spur_exit():
-    legs = nav2_legs.plan_legs(RUN4_OUT_OF_S1)
-    exit_leg = _leg_ending_at(legs, (-13.0, 10.0))
+    exit_leg = _exit_chunk(RUN4_OUT_OF_S1)
     # THE POSE, not the bay point: since D9 the 0.245 m of parking error
-    # in front of it is folded into this leg rather than being a leg.
+    # in front of it is folded into this chunk rather than being a leg.
     assert exit_leg.start == RUN4_OUT_OF_S1[0]
     assert exit_leg.points[1] == (-13.0, 4.25)
+    assert exit_leg.end == (-13.0, 10.0)
     assert exit_leg.klass == nav2_legs.SPUR_EXIT
     assert exit_leg.tree_key == "nav.bt_xml_rpp"
     assert exit_leg.controller == "rpp"
+    # ... and in a ROUTE it is the head of the chain, mouth corner and
+    # all (D15).
+    legs = nav2_legs.plan_legs(RUN4_OUT_OF_S1)
+    assert legs[0].klass == nav2_legs.RING_CHAIN
+    assert legs[0].start == RUN4_OUT_OF_S1[0]
+    assert (-13.0, 10.0) in legs[0].points
 
 
 def test_the_parking_error_is_not_a_leg_at_all():
@@ -605,18 +664,24 @@ def test_the_parking_error_is_not_a_leg_at_all():
     # - a run shorter than PREEMPT_AT_M would be dispatched and
     # displaced in the same tick.
     legs = nav2_legs.plan_legs(RUN4_OUT_OF_S1)
-    assert legs[0].klass == nav2_legs.SPUR_EXIT
+    assert legs[0].klass == nav2_legs.RING_CHAIN
     assert nav2_legs.leg_length_m(legs[0].points) > nav2_legs.PREEMPT_AT_M
     assert not any(math.dist(leg.start, leg.end) < nav2_legs.ON_STATION_M
                    for leg in legs)
+    # AND IT IS NOT A CORNER EITHER (D14): the 0.245 m stub in front of
+    # the bay point cannot carry the tangent the mouth needs, so the
+    # PATH starts at the bay point rather than being refused for it.
+    built = nav2_legs.chain_path(legs[0],
+                                 current_yaw=float(STATIONS["S1"]["yaw"]))
+    assert built.dropped in (0, 1)
+    assert nav2_path.cusp_at(built.poses) is None
 
 
 def test_a_spur_exit_ends_on_the_bays_own_heading():
     # THE 180 DEGREE TURN, REFUSED. The last segment points north
     # (+1.5708); the bay's heading is -1.5708; the truck is standing on
     # the bay ON that heading, and the way out is straight.
-    legs = nav2_legs.plan_legs(RUN4_OUT_OF_S1)
-    exit_leg = _leg_ending_at(legs, (-13.0, 10.0))
+    exit_leg = _exit_chunk(RUN4_OUT_OF_S1)
     segment = math.atan2(exit_leg.end[1] - exit_leg.points[-2][1],
                          exit_leg.end[0] - exit_leg.points[-2][0])
     assert abs(segment - math.pi / 2.0) < 1e-9
@@ -629,10 +694,17 @@ def test_every_spur_exit_leaves_on_its_own_bays_heading():
     for station_id, station in STATIONS.items():
         poly = _plan((station["x"], station["y"]), "S12"
                      if station_id != "S12" else "S1")
-        legs = nav2_legs.plan_legs(poly)
-        exits = [leg for leg in legs if leg.klass == nav2_legs.SPUR_EXIT]
-        assert len(exits) == 1, station_id
-        assert nav2_legs.leg_yaw(exits[0]) == float(station["yaw"]), station_id
+        exit_leg = _exit_chunk(poly)
+        assert exit_leg.klass == nav2_legs.SPUR_EXIT, station_id
+        assert nav2_legs.leg_yaw(exit_leg) == float(station["yaw"]), \
+            station_id
+        # AND THE SENSE THE CHAIN DRIVES IT IN IS THE ONE IT IS ALREADY
+        # STANDING IN (D15): out of the bay, dead astern, no turn asked
+        # of a standing truck.
+        chain = nav2_legs.plan_legs(poly)[0]
+        assert chain.klass == nav2_legs.RING_CHAIN, station_id
+        assert nav2_legs.chain_sense(chain, float(station["yaw"])) is True, \
+            station_id
 
 
 def test_the_spur_exit_reads_one_station_table_and_not_two():
@@ -698,9 +770,30 @@ def _turn(goal_yaw, current_yaw):
     return abs(follower.norm_ang(goal_yaw - current_yaw))
 
 
+def _run5_legs():
+    """RUN5_OUT_OF_S1 as the leg objects D7 was measured on.
+
+    BUILT OFF split_legs AND NOT OFF plan_legs, AND THAT IS AMENDMENTS 9
+    AND NOTHING ELSE. On this floor today the three transits in the
+    middle of this route are one ring chain, so plan_legs no longer
+    hands back a TRANSIT to ask leg_yaw about. THE GEOMETRY IS STILL RUN
+    5's OWN, the class is still classify()'s answer, and the rule under
+    test is still the one that was raised against a truck that left the
+    aisle: a transit goal is the travel direction or its pi-flip,
+    whichever is the smaller rotation. It is kept because the rule is
+    kept - chain_sense asks the same comparison of the same file, off
+    the FIRST segment instead of the last - and because the day a
+    transit goal exists again this is what says what it means.
+    """
+    chunks = nav2_legs.split_legs(RUN5_OUT_OF_S1)
+    return [_leg(nav2_legs.classify(points, final=index == len(chunks) - 1),
+                 points, final=index == len(chunks) - 1)
+            for index, points in enumerate(chunks)]
+
+
 def test_the_eastbound_leg_out_of_s1_takes_the_pi_flip():
     """RUN 5's OWN GEOMETRY, and the answer that would have driven it."""
-    legs = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
+    legs = _run5_legs()
     east = _leg_ending_at(legs, (0.0, 10.0))
     assert east.klass == nav2_legs.TRANSIT
     # the travel direction, which is what the old rule returned
@@ -720,7 +813,7 @@ def test_the_eastbound_leg_out_of_s1_takes_the_pi_flip():
 def test_a_transit_leg_keeps_the_travel_direction_when_that_is_nearer():
     """The flip is not a preference - it is a MINIMUM, and a truck
     already pointing along its leg is asked for nothing."""
-    legs = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
+    legs = _run5_legs()
     east = _leg_ending_at(legs, (0.0, 10.0))
     assert nav2_legs.leg_yaw(east, 0.0) == 0.0
     assert nav2_legs.leg_yaw(east, 0.4) == 0.0
@@ -729,7 +822,7 @@ def test_a_transit_leg_keeps_the_travel_direction_when_that_is_nearer():
 
 def test_the_westbound_case_is_the_same_rule_mirrored():
     """The southern ring leg, driven west, off the same route."""
-    legs = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
+    legs = _run5_legs()
     west = _leg_ending_at(legs, (-7.0, -10.0))
     assert west.klass == nav2_legs.TRANSIT
     segment = math.atan2(west.end[1] - west.points[-2][1],
@@ -761,7 +854,7 @@ def test_the_tie_at_a_quarter_turn_goes_to_the_flip_and_says_so():
     which is why it is a rule and not a footnote.
     """
     assert nav2_legs.QUARTER_TURN_RAD == math.pi / 2.0
-    legs = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
+    legs = _run5_legs()
     east = _leg_ending_at(legs, (0.0, 10.0))
     for mouth in (-math.pi / 2.0, math.pi / 2.0):
         got = nav2_legs.leg_yaw(east, mouth)
@@ -772,7 +865,7 @@ def test_the_tie_at_a_quarter_turn_goes_to_the_flip_and_says_so():
 def test_a_transit_leg_asked_without_a_current_yaw_is_refused_by_name():
     """The heading is a fact about the TRUCK, and this file will not
     guess which way it is pointing - guessing is exactly D7."""
-    legs = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
+    legs = _run5_legs()
     east = _leg_ending_at(legs, (0.0, 10.0))
     with pytest.raises(nav2_legs.Nav2LegsError) as caught:
         nav2_legs.leg_yaw(east)
@@ -782,7 +875,7 @@ def test_a_transit_leg_asked_without_a_current_yaw_is_refused_by_name():
 def test_a_bays_own_legs_ignore_the_trucks_heading_entirely():
     """STATION and SPUR_EXIT are D5's rows and D7 does not touch them:
     a bay's approach is the bay's, whatever the truck is doing."""
-    legs = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
+    legs = _run5_legs()
     spur = _leg_ending_at(legs, (-7.0, -4.25))
     exit_leg = _leg_ending_at(legs, (-13.0, 10.0))
     assert spur.klass == nav2_legs.STATION_SPUR
@@ -797,7 +890,7 @@ def test_no_leg_of_the_s1_to_s4_order_demands_more_than_a_quarter_turn():
     leg's current yaw - which is what a truck that reaches its goals
     actually does - and no transit on the way asks for more than the 90
     degrees a right-angled junction already is."""
-    legs = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
+    legs = _run5_legs()
     current = float(STATIONS["S1"]["yaw"])          # standing in the bay
     for leg in legs:
         goal = nav2_legs.leg_yaw(leg, current)
@@ -861,7 +954,7 @@ def test_every_mouth_yaw_run_6_measured_takes_the_flip():
     """THE REGRESSION, ONE ROW PER MEASUREMENT. Eastbound out of the S1
     mouth and westbound out of it: whichever way the ring leg runs, a
     truck standing on the bay's heading drives on."""
-    legs = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
+    legs = _run5_legs()
     east = _leg_ending_at(legs, (0.0, 10.0))
     for mouth in RUN6_MOUTH_YAWS:
         got = nav2_legs.leg_yaw(east, mouth)
@@ -889,7 +982,7 @@ def test_the_travel_direction_still_wins_when_it_is_clearly_nearer():
     """THE BAND IS A BAND AND NOT A NEW DEFAULT. Run 6's own recovery
     leg - end=(-13.00, 10.00) truck_yaw=-0.517 - is a truck genuinely
     pointing down its leg, and it keeps the travel direction."""
-    legs = nav2_legs.plan_legs(RUN5_OUT_OF_S1)
+    legs = _run5_legs()
     east = _leg_ending_at(legs, (0.0, 10.0))
     assert nav2_legs.leg_yaw(east, -0.517) == 0.0
     assert nav2_legs.leg_yaw(east, 1.2) == 0.0
@@ -943,7 +1036,7 @@ RUN6_OFF_THE_SPAWN = [
 
 def test_the_parking_error_at_the_spawn_is_not_a_leg_of_its_own():
     legs = nav2_legs.plan_legs(RUN6_OFF_THE_SPAWN)
-    assert [leg.klass for leg in legs] == [nav2_legs.TRANSIT,
+    assert [leg.klass for leg in legs] == [nav2_legs.RING_CHAIN,
                                            nav2_legs.STATION_SPUR]
     assert legs[0].start == (-17.000398284298246, 9.954715559641215)
     assert legs[0].end == (-13.0, 10.0)
@@ -973,10 +1066,19 @@ def test_no_leg_that_can_be_preempted_is_born_already_inside_p():
 def test_the_merged_leg_keeps_the_heading_of_its_own_last_segment():
     """Merging is not a re-split: the goal still sits on the leg's last
     segment, which is the ring leg and not the parking error."""
-    legs = nav2_legs.plan_legs(RUN6_OFF_THE_SPAWN)
-    assert nav2_legs.leg_yaw(legs[0], math.pi) == pytest.approx(
+    merged = nav2_legs.split_legs(RUN6_OFF_THE_SPAWN)[0]
+    assert merged[0] == RUN6_OFF_THE_SPAWN[0] and merged[1] == (-17.0, 10.0)
+    leg = _leg(nav2_legs.TRANSIT, merged)
+    assert nav2_legs.leg_yaw(leg, math.pi) == pytest.approx(
         -math.pi, abs=1e-9)
-    assert nav2_legs.leg_yaw(legs[0], 0.0) == 0.0
+    assert nav2_legs.leg_yaw(leg, 0.0) == 0.0
+    # AND THE CHAIN INHERITS THE MERGE UNCHANGED (AMENDMENTS 9): the
+    # 0.047 m of parking error is still not an object of its own, it is
+    # still the head of the run, and the chain's own sense is read off
+    # the segment it starts with.
+    chain = nav2_legs.plan_legs(RUN6_OFF_THE_SPAWN)[0]
+    assert chain.klass == nav2_legs.RING_CHAIN
+    assert chain.points[:2] == [RUN6_OFF_THE_SPAWN[0], (-17.0, 10.0)]
 
 
 def test_a_short_FINAL_leg_is_left_alone():
@@ -1099,6 +1201,27 @@ def _lengths(poly):
             for leg in nav2_legs.plan_legs(poly)]
 
 
+def _retired_align_legs(polyline):
+    """The leg queue plan_legs used to build, through the RETIRED split.
+
+    AMENDMENTS 9 stopped calling _align_split: the ring is one chain now
+    and there is no on-ring goal left for an alignment goal to open. The
+    mechanism, its constants and everything two waves measured about it
+    are KEPT - see ALIGN's own note in nav2_legs - and this is how the
+    suite still drives them. Every assertion below is therefore about
+    what the alignment leg WAS and why, which is the record the next
+    person to propose a short goal at a turn has to read first.
+    """
+    chunks, aligned = nav2_legs._align_split(nav2_legs.split_legs(polyline))
+    legs = []
+    for index, points in enumerate(chunks):
+        final = index == len(chunks) - 1
+        klass = (nav2_legs.ALIGN if index in aligned
+                 else nav2_legs.classify(points, final=final))
+        legs.append(_leg(klass, points, final=final))
+    return legs
+
+
 def test_the_align_class_is_in_the_table_and_runs_the_transit_tree():
     """An alignment leg is a transit in every way but its length."""
     assert nav2_legs.ALIGN in nav2_legs.CLASS_TREE
@@ -1133,15 +1256,21 @@ def test_an_alignment_leg_hands_over_in_motion_like_any_transit():
         nav2_legs.runs_to_its_goal(_align_leg())) is True
 
 
-def test_the_spur_exit_is_the_only_class_that_still_stops():
-    """D10 keeps its stop and it is now the ONLY one (AMENDMENTS 8).
+def test_the_two_classes_that_stop_stop_for_two_different_reasons():
+    """D10's stop, and AMENDMENTS 9's - which is not a policy at all.
 
-    Which matters for a reason the tuple cannot show on its own: a spur
-    exit stops ON THE BAY'S OWN AXIS at a graph node, having driven
-    5.75 m dead astern in a straight line. It is the one standstill
-    this file can build, and it is not a pose in the middle of a turn.
+    A SPUR EXIT stops because a quarter turn must not be taken at
+    0.30 m/s (D10, runs 8 and 9), and where it stops is a graph node on
+    the bay's own axis after 5.75 m of straight dead-astern running.
+    A RING CHAIN stops because it is a goal on ANOTHER ACTION SERVER:
+    there is no such thing as preempting a FollowPath with a
+    NavigateToPose, so the boundary is arithmetic and not a choice.
+    An ALIGN leg is in neither list, and AMENDMENTS 8 is why.
     """
-    assert nav2_legs.DRIVEN_TO_ITS_GOAL == (nav2_legs.SPUR_EXIT,)
+    assert nav2_legs.DRIVEN_TO_ITS_GOAL == (nav2_legs.SPUR_EXIT,
+                                            nav2_legs.RING_CHAIN)
+    assert nav2_legs.ALIGN not in nav2_legs.DRIVEN_TO_ITS_GOAL
+    assert nav2_legs.TRANSIT not in nav2_legs.DRIVEN_TO_ITS_GOAL
 
 
 def test_the_alignment_length_is_an_arc_a_handover_and_a_straightening():
@@ -1218,7 +1347,7 @@ def test_the_long_eastbound_leg_off_the_s1_mouth_is_split():
     east. That second leg is what died.
     """
     poly = _plan((-13.0, 4.25), "S4")
-    legs = nav2_legs.plan_legs(poly)
+    legs = _retired_align_legs(poly)
     klasses = [leg.klass for leg in legs]
     assert nav2_legs.SPUR_EXIT in klasses
     exit_at = klasses.index(nav2_legs.SPUR_EXIT)
@@ -1235,7 +1364,7 @@ def test_the_long_eastbound_leg_off_the_s1_mouth_is_split():
 def test_the_alignment_leg_and_its_remainder_are_the_original_leg():
     """The split adds a vertex; it does not move the route."""
     poly = _plan((-13.0, 4.25), "S4")
-    legs = nav2_legs.plan_legs(poly)
+    legs = _retired_align_legs(poly)
     aligned = [index for index, leg in enumerate(legs)
                if leg.klass == nav2_legs.ALIGN]
     assert aligned
@@ -1268,6 +1397,20 @@ def _every_queue():
             yield start, station, nav2_legs.plan_legs(poly)
 
 
+def _every_retired_queue():
+    """The same sweep through the RETIRED alignment split.
+
+    What plan_legs used to hand back, kept so that the sweeps written
+    about _align_split stay sweeps about _align_split (AMENDMENTS 9).
+    """
+    for start in ALL_STARTS:
+        for station in sorted(STATIONS):
+            poly = _drivable(start, station)
+            if poly is None:
+                continue
+            yield start, station, _retired_align_legs(poly)
+
+
 def test_no_standing_start_is_ever_handed_a_long_goal():
     """THE PIN AMENDMENTS 8 EXISTS FOR, over every route on the floor.
 
@@ -1287,25 +1430,67 @@ def test_no_standing_start_is_ever_handed_a_long_goal():
         truck is never shown a goal further than the alignment leg
         would have been, whether it got one or not.
     """
+    longest_spur = max(
+        math.dist((station["x"], station["y"]), foot)
+        for station, foot in ((STATIONS[sid], nav2_legs.spur_feet()[sid])
+                              for sid in STATIONS))
+    ceiling = longest_spur + nav2_legs.ON_STATION_M
     for start, station, legs in _every_queue():
         for index in range(1, len(legs)):
-            if not nav2_legs.runs_to_its_goal(legs[index - 1]):
-                continue
             where = "{} -> {} leg {}".format(start, station, index)
-            assert legs[index - 1].klass == nav2_legs.SPUR_EXIT, where
-            assert nav2_legs.leg_length_m(legs[index].points) \
-                <= nav2_legs.SPLIT_ABOVE_M + 1e-9, where
+            # every leg stops now, so every boundary is a standing start
+            assert nav2_legs.runs_to_its_goal(legs[index - 1]), where
+            following = legs[index]
+            if following.klass == nav2_legs.RING_CHAIN:
+                # NOT A PLANNER GOAL AT ALL. A chain is a path this
+                # adapter built off the grant, so its length is not a
+                # question anybody asks Smac.
+                continue
+            assert nav2_legs.leg_length_m(following.points) <= ceiling, \
+                (where, following.klass)
 
 
-def test_the_only_legs_driven_to_their_goals_are_the_mouth_and_the_bay():
-    """The other half of the same sentence: no leg in the MIDDLE of a
-    route stops except a spur exit, and the last one always does."""
+def test_smac_is_never_asked_for_anything_but_a_spur_any_more():
+    """THE WHOLE OF AMENDMENTS 9, AS ONE PROPERTY OVER THE FLOOR.
+
+    Runs 15 and 16 counted 13 and 8 Smac refusals - "exceeded maximum
+    iterations" and "no valid path found" - every one of them over free
+    paint, and every one of them on a RING goal. There are no ring goals
+    left. Every NavigateToPose this file can now produce is a spur exit
+    or a station spur, which is 5.75 m of straight aisle at the widest,
+    on the bay's own axis, with the truck standing on that axis.
+    """
+    longest_spur = max(
+        math.dist((station["x"], station["y"]), foot)
+        for station, foot in ((STATIONS[sid], nav2_legs.spur_feet()[sid])
+                              for sid in STATIONS))
+    assert longest_spur == pytest.approx(5.75)
+    for start, station, legs in _every_queue():
+        for leg in legs:
+            if leg.klass == nav2_legs.RING_CHAIN:
+                continue
+            assert leg.klass in (nav2_legs.SPUR_EXIT,
+                                 nav2_legs.STATION_SPUR), (start, station)
+            assert nav2_legs.leg_length_m(leg.points) \
+                <= longest_spur + nav2_legs.ON_STATION_M, (start, station)
+
+
+def test_every_leg_of_every_route_is_now_driven_to_its_own_goal():
+    """The other half of the same sentence, and it is now ALL of them.
+
+    Two reasons, one per class: the mouth because a quarter turn must
+    not be taken at speed (D10), the chain because it is on another
+    action server, the bay because it is final. Nothing hands over at P
+    on this floor today - see should_preempt, which is still the rule.
+    """
     for start, station, legs in _every_queue():
         where = "{} -> {}".format(start, station)
         assert nav2_legs.runs_to_its_goal(legs[-1]) is True, where
-        for leg in legs[:-1]:
-            assert nav2_legs.runs_to_its_goal(leg) is (
-                leg.klass == nav2_legs.SPUR_EXIT), where
+        for leg in legs:
+            assert nav2_legs.runs_to_its_goal(leg) is True, (where,
+                                                             leg.klass)
+            assert not nav2_legs.should_preempt(
+                0.01, nav2_legs.runs_to_its_goal(leg)), where
 
 
 def test_the_alignment_goal_may_sit_past_a_collinear_vertex():
@@ -1321,7 +1506,7 @@ def test_the_alignment_goal_may_sit_past_a_collinear_vertex():
     point past one of its vertices is still a point of this leg on this
     leg's heading. Walking is therefore free; refusing is not.
     """
-    legs = nav2_legs.plan_legs(_plan((-13.0, 4.25), "S4"))
+    legs = _retired_align_legs(_plan((-13.0, 4.25), "S4"))
     align = [leg for leg in legs if leg.klass == nav2_legs.ALIGN][0]
     assert math.dist(align.points[0], align.points[1]) == pytest.approx(3.0)
     assert math.dist(align.points[0], align.points[1]) < nav2_legs.ALIGN_M
@@ -1339,9 +1524,13 @@ def test_the_alignment_goal_may_sit_past_a_collinear_vertex():
 
 def test_the_split_still_reaches_every_long_chunk_on_the_floor():
     """The sweep behind the sentence above: every chunk over the
-    threshold gets its alignment leg, whatever its node spacing."""
+    threshold gets its alignment leg, whatever its node spacing.
+
+    THROUGH THE RETIRED SPLIT (AMENDMENTS 9). This is a statement about
+    _align_split and it stays a statement about _align_split.
+    """
     seen = 0
-    for start, station, legs in _every_queue():
+    for start, station, legs in _every_retired_queue():
         for index in range(1, len(legs)):
             leg = legs[index]
             if leg.klass != nav2_legs.TRANSIT:
@@ -1372,13 +1561,116 @@ def test_a_mouth_to_mouth_hop_is_now_its_own_alignment_leg():
     Now it is one goal, 6.00 m, driven from the mouth stop and handed
     over at P into the bay. One decision instead of two.
     """
-    legs = nav2_legs.plan_legs(_plan((-13.0, 4.25), "S2"))
+    legs = _retired_align_legs(_plan((-13.0, 4.25), "S2"))
     assert [leg.klass for leg in legs] == [
         nav2_legs.SPUR_EXIT, nav2_legs.TRANSIT, nav2_legs.STATION_SPUR]
     hop = legs[1]
     assert nav2_legs.leg_length_m(hop.points) == pytest.approx(6.0)
     assert nav2_legs.leg_length_m(hop.points) <= nav2_legs.SPLIT_ABOVE_M
     assert nav2_legs.runs_to_its_goal(hop) is False
+    # AND IT IS A CHAIN NOW (AMENDMENTS 9), which is the same 6.00 m
+    # driven the same way and one fewer object to lose: the mouth-to-
+    # mouth hop was never the problem, it was the class it belonged to.
+    live = nav2_legs.plan_legs(_plan((-13.0, 4.25), "S2"))
+    assert [leg.klass for leg in live] == [
+        nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR]
+    # the 6.00 m hop, with its own spur in front of it since D15
+    assert nav2_legs.leg_length_m(live[0].points) == pytest.approx(5.75 + 6.0)
+
+
+#: THE THREE ROUTES RUNS 15 AND 16 DIED ON, verbatim off their own
+#: wires. They are the regression this ruling exists for and they are
+#: named rather than described: whatever else changes, these three have
+#: to come out as one chain each.
+RUN16_KILLERS = (
+    # run 16 11:19:18, the S1 -> S4 order: three alignment legs, three
+    # transits, and the two that never closed.
+    [(-13.004068249189379, 4.497599190050925), (-13.0, 4.25), (-13.0, 10.0),
+     (-10.0, 10.0), (-7.0, 10.0), (-3.5, 10.0), (0.0, 10.0), (0.0, 0.0),
+     (0.0, -10.0), (-3.5, -10.0), (-7.0, -10.0), (-7.0, -4.25)],
+    # run 16 11:20:07, the recovery leg back to S1 that blocked at the
+    # NW ring corner.
+    [(-12.778860479864138, 8.8434345150865), (-13.0, 4.25)],
+    # run 16 11:26:16, the leg off (0, -10) that blocked at best 4.26 m.
+    [(-0.14864447923419905, -9.618393658554291), (0.0, 0.0), (0.0, 10.0),
+     (-3.5, 10.0), (-7.0, 10.0), (-10.0, 10.0), (-13.0, 10.0),
+     (-13.0, 4.25)],
+)
+
+
+def test_run_16s_two_sense_goal_is_unconstructable_now():
+    """THE C7 CHATTER, AS A NAMED REGRESSION (AMENDMENTS 9).
+
+    Run 16 lost three of eight alignment legs to one shape: a goal
+    ALIGN_M (4.51 m) along a ring leg, dispatched at a right-angled
+    turn, far enough that both driving senses cost the same - and with
+    DirectionStablePath gone (AMENDMENTS 5) nothing held a choice across
+    replans. The body twist changed sign fourteen times in thirty
+    seconds on the first of them and six on the second, and all three
+    died on the closing watchdog with `best` equal to ALIGN_M itself.
+
+    THE FIX IS NOT A BETTER TIE-BREAK. There is no ring goal left for
+    the two senses to tie over: the whole ring run is one path, the
+    sense is decided once at dispatch, and no goal is ever placed at a
+    turn again. This test says exactly that, over the three routes that
+    carried the failure.
+    """
+    for poly in RUN16_KILLERS:
+        legs = nav2_legs.plan_legs(poly)
+        klasses = [leg.klass for leg in legs]
+        assert nav2_legs.ALIGN not in klasses, klasses
+        assert nav2_legs.TRANSIT not in klasses, klasses
+        # ... and no goal this route sends sits at a turn: the two
+        # manoeuvre classes end on a bay or on its mouth, and the chain
+        # ends at a spur foot.
+        for leg in legs:
+            if leg.klass == nav2_legs.RING_CHAIN:
+                continue
+            on_a_bay = nav2_legs.station_at(leg.end) is not None
+            assert on_a_bay or leg.end in set(
+                nav2_legs.spur_feet().values()), (leg.klass, leg.end)
+
+
+def test_the_two_run_15_and_16_killers_are_one_chain_each():
+    """spawn -> S1 and S1 -> S4, the two orders the waves kept losing.
+
+    ZERO INTERMEDIATE DECISIONS is the claim, and the number of goals
+    between the mouth and the bay is how it is measured: one.
+    """
+    spawn_to_s1 = nav2_legs.plan_legs(_plan(F1_SPAWN, "S1"))
+    assert [leg.klass for leg in spawn_to_s1] == [
+        nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR]
+    assert nav2_legs.leg_length_m(spawn_to_s1[0].points) == pytest.approx(4.0)
+
+    s1_to_s4 = nav2_legs.plan_legs(RUN16_KILLERS[0])
+    assert [leg.klass for leg in s1_to_s4] == [
+        nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR]
+    chain = s1_to_s4[0]
+    assert chain.start == RUN16_KILLERS[0][0]     # the truck, in the bay
+    assert chain.end == (-7.0, -10.0)
+    assert nav2_legs.leg_length_m(chain.points) == pytest.approx(46.0,
+                                                                 abs=0.01)
+    # ONE PATH, THREE ROUNDED CORNERS - the mouth and the two ring ones -
+    # AND NO CUSP over the whole forty-five metres.
+    built = nav2_legs.chain_path(chain, current_yaw=-1.5708)
+    assert built.corners == 3
+    assert nav2_path.cusp_at(built.poses) is None
+    assert built.flipped is True            # dead astern out of the bay
+
+
+def test_a_mouth_to_mouth_hop_is_a_chain_and_the_chatter_geometry_is_gone():
+    """The 6.00 m hop, and the 4.51 m goal that used to sit inside it.
+
+    Under AMENDMENTS 8 this chunk was left whole because SPLIT_ABOVE_M
+    had followed ALIGN_M past 6.00 m; the LONGER hops were the ones that
+    got the alignment goal and died on it. Now none of them does.
+    """
+    for goal in ("S2", "S3", "S4"):
+        legs = nav2_legs.plan_legs(_plan((-13.0, 4.25), goal))
+        assert [leg.klass for leg in legs] == [
+            nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR], goal
+        built = nav2_legs.chain_path(legs[0], current_yaw=-1.5708)
+        assert nav2_path.cusp_at(built.poses) is None, goal
 
 
 def test_a_leg_at_the_head_of_a_route_is_never_split():
@@ -1411,7 +1703,7 @@ def test_a_long_leg_off_a_turn_is_split_wherever_the_turn_is():
     which is also the cheaper rule to state.
     """
     poly = [(-13.0, 10.0), (-20.0, 10.0), (-20.0, -10.0)]
-    legs = nav2_legs.plan_legs(poly)
+    legs = _retired_align_legs(poly)
     klasses = [leg.klass for leg in legs]
     assert klasses[0] == nav2_legs.TRANSIT       # head of the route
     assert klasses[1] == nav2_legs.ALIGN, klasses
@@ -1427,7 +1719,7 @@ def test_the_alignment_goal_takes_the_bidirectional_transit_yaw():
     allowed both.
     """
     poly = _plan((-13.0, 4.25), "S4")
-    legs = nav2_legs.plan_legs(poly)
+    legs = _retired_align_legs(poly)
     align = [leg for leg in legs if leg.klass == nav2_legs.ALIGN][0]
     east = math.atan2(align.end[1] - align.start[1],
                       align.end[0] - align.start[0])
@@ -1622,7 +1914,11 @@ def test_no_other_legs_goal_moves_off_its_own_end():
                     continue
                 assert leg.goal == (float(leg.end[0]), float(leg.end[1])), \
                     (station_id, leg.klass)
-    assert seen == set(nav2_legs.CLASS_TREE)
+    # THE TWO CLASSES A ROUTE CAN NOW CARRY. TRANSIT, ALIGN and - since
+    # D15 - SPUR_EXIT are still in the table and still tested (each in
+    # its own section); what this sweep says is that no ROUTE produces
+    # one.
+    assert seen == {nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR}
 
 
 def test_the_bay_clearance_is_measured_off_the_floor_the_sdf_paints():
@@ -1713,3 +2009,118 @@ def test_a_bias_the_bay_can_take_is_not_refused(monkeypatch):
     monkeypatch.setattr(nav2_legs, "ARRIVE_BIAS_M", 1.5)
     bay = nav2_legs.plan_legs(poly)[-1]
     assert math.dist(bay.goal, bay.end) == pytest.approx(1.5, abs=1e-9)
+
+
+# ----------------------------------------------------------------------
+# DEFECT D15: A CHAIN DISPATCHED TO A TRUCK STANDING ACROSS IT
+# (measured 2026-09-02, m6_ver2/logs/run17-c8-session-a)
+#
+# AMENDMENTS 9 left the spur exit on NavigateToPose, so the truck still
+# STOPPED at the bay mouth (D10) on the bay heading - and the ring chain
+# was then dispatched to a truck standing at RIGHT ANGLES to its first
+# segment. RPP is a pure pursuit: its curvature is 2 sin(alpha) / L for a
+# carrot at angle alpha and distance L, so at alpha = 90 deg and the
+# configured lookahead band (0.70 to 0.95 m) it demands 2.1 to 2.9 1/m -
+# a turning radius of 0.35 to 0.48 m against this truck's measured
+# minimum of 1.25. There is no plan and no tuning behind that number: it
+# is the geometry of a carrot across the body axis.
+#
+# WHAT IT DID, ON GROUND TRUTH, over the 30 s the watchdog gave it:
+#
+#   (-12.98, 9.39) yaw -1.49  ->  (-13.27, 10.16) -2.47
+#   (-12.88, 10.75)  2.69     ->  (-12.51, 10.79)  2.12
+#   (-12.34, 10.37)  2.10     ->  (-12.08,  9.59) -3.02
+#   (-11.65,  9.47) -2.45     ->  (-11.26,  9.92) -2.61
+#   /auto/state BLOCKED "blocked: no progress - best 20.30 m, 30 s
+#                        without closing"                x3, three orders
+#
+# A CIRCLE, at the steer stop, 0.79 m north of the ring centreline: the
+# truck orbiting a carrot it could not turn tightly enough to reach.
+#
+# THE FIX IS THE ONE AMENDMENTS 9 ALREADY ARGUES FOR, APPLIED ONE LEG
+# EARLIER. A corner is drivable when the path carries the truck INTO it
+# along its own axis and rounds it at the truck's own radius - which is
+# exactly what the chain does at every ring corner, and exactly what the
+# mouth was denied by being a leg boundary. So the chain STARTS IN THE
+# BAY: the spur exit is folded into it, the mouth becomes an ordinary
+# rounded corner with 1.25 m of spur behind it and 1.25 m of ring ahead,
+# and the truck leaves the bay dead astern along its own axis with the
+# carrot straight in front of the forks.
+#   D10 IS NOT OVERTURNED, IT IS SATISFIED. "The truck does not take a
+# quarter turn at 0.30 m/s" was a statement about a GOAL a quarter turn
+# away being handed to a heading-aware planner. There is no goal at the
+# mouth any more, and the arc the truck drives through it is one it can
+# hold at any speed the envelope allows.
+#   THE STATION SPUR KEEPS Smac, unchanged: entering a 4.00 m bay off
+# the ring band is the manoeuvre, and it is the only leg with a 0.25 m
+# checker on it.
+# ----------------------------------------------------------------------
+
+def test_a_route_out_of_a_bay_is_one_chain_from_the_bay():
+    legs = nav2_legs.plan_legs(RUN16_KILLERS[0])
+    assert [leg.klass for leg in legs] == [
+        nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR]
+    chain = legs[0]
+    # IT STARTS AT THE BAY and not at the mouth: the 5.75 m of spur is
+    # the run-in the mouth corner needs.
+    assert chain.points[0] == (-13.004068249189379, 4.497599190050925)
+    assert (-13.0, 4.25) in chain.points
+    assert (-13.0, 10.0) in chain.points
+    assert chain.end == (-7.0, -10.0)
+
+
+def test_the_mouth_is_a_rounded_corner_inside_the_chain_now():
+    legs = nav2_legs.plan_legs(RUN16_KILLERS[0])
+    built = nav2_legs.chain_path(legs[0],
+                                 current_yaw=float(STATIONS["S1"]["yaw"]))
+    # THREE CORNERS: the mouth, the spine junction, and the south one.
+    assert built.corners == 3
+    assert nav2_path.cusp_at(built.poses) is None
+    # ... and the truck leaves the bay FORKS-FIRST, which is the sense it
+    # is already standing in - no turn is demanded of a standing truck.
+    assert built.flipped is True
+
+
+def test_no_chain_is_ever_dispatched_across_the_trucks_own_axis():
+    """THE PIN D15 EXISTS FOR, over every route this floor can plan.
+
+    RPP's curvature is 2 sin(alpha) / L. With the configured lookahead
+    floor (0.70 m) and this truck's 1.25 m minimum radius, the carrot has
+    to sit within asin(L / (2 r)) = 16.3 deg of the body axis for the
+    demand to be one the truck can meet. A chain whose first segment is
+    a quarter turn from the truck's own heading is the orbit run 17
+    measured.
+      SO: for every route, from the pose and heading the truck actually
+    has when the chain is dispatched, the chain's first segment is along
+    the truck's own axis to within a quarter of a right angle.
+    """
+    for station_id in sorted(STATIONS):
+        for origin_id in sorted(STATIONS):
+            if origin_id == station_id:
+                continue
+            origin = (STATIONS[origin_id]["x"], STATIONS[origin_id]["y"])
+            legs = nav2_legs.plan_legs(_plan(origin, station_id))
+            assert legs[0].klass == nav2_legs.RING_CHAIN, (origin_id,
+                                                           station_id)
+            # the truck is standing in its bay, on the bay's heading
+            yaw = float(STATIONS[origin_id]["yaw"])
+            first = math.atan2(legs[0].points[1][1] - legs[0].points[0][1],
+                               legs[0].points[1][0] - legs[0].points[0][0])
+            off = abs(follower.norm_ang(first - yaw))
+            off = min(off, math.pi - off)      # either sense will do
+            assert off < math.pi / 8.0, (origin_id, station_id, off)
+
+
+def test_the_spur_exit_class_survives_a_route_that_is_only_a_spur_exit():
+    """The class is not deleted, and D5's heading rule is not either.
+
+    A route that LEAVES a bay and ends nowhere near one is still a spur
+    exit on its own - there is no chain for it to be folded into. It is
+    not a shape the fleet builds today, and it is kept because the class
+    is the record of D5 and the day a route ends at a mouth it is what
+    decides the heading.
+    """
+    assert nav2_legs.SPUR_EXIT in nav2_legs.CLASS_TREE
+    leg = _leg(nav2_legs.SPUR_EXIT, [(-13.0, 4.25), (-13.0, 10.0)],
+               final=True)
+    assert nav2_legs.leg_yaw(leg, 0.0) == float(STATIONS["S1"]["yaw"])

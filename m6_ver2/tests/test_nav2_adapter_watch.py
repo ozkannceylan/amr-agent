@@ -215,3 +215,40 @@ def test_a_margin_that_is_not_a_number_is_refused_by_name():
     with pytest.raises(nav2_watch.Nav2WatchError) as caught:
         nav2_watch.arrival_is_short(0.30, 0.25, None)
     assert "margin" in str(caught.value)
+
+
+# ----------------------------------------------------------------------
+# THE SECOND ACTION SERVER'S OWN CODES (SPEC_ADAPTER.md AMENDMENTS 9)
+#
+# A ring chain is a `nav2_msgs/FollowPath`, so an aborted chain comes
+# back with a CONTROLLER code and never a planner one - there is no
+# planner in its path at all. The FollowPath.action file
+# (/opt/ros/jazzy/share/nav2_msgs/action/FollowPath.action, nav2 1.3.12)
+# declares 101..107, all inside CONTROLLER_CODES, so the table already
+# reads every one of them. This is the pin that says so.
+# ----------------------------------------------------------------------
+
+def test_every_follow_path_error_code_lands_in_the_controller_row():
+    declared = {101: "INVALID_CONTROLLER", 102: "TF_ERROR",
+                103: "INVALID_PATH", 104: "PATIENCE_EXCEEDED",
+                105: "FAILED_TO_MAKE_PROGRESS", 106: "NO_VALID_CONTROL",
+                107: "CONTROLLER_TIMED_OUT"}
+    for code, name in declared.items():
+        assert code in nav2_watch.CONTROLLER_CODES, code
+        note = nav2_watch.blocked_note_for_error(code)
+        assert note == "blocked: controller gave up (error_code {})".format(
+            code)
+        assert nav2_watch.error_code_name(code) == name
+
+
+def test_the_chain_refusal_note_is_a_sentence_and_not_a_number():
+    """It is not nav2 saying no - it is THIS adapter refusing to build.
+
+    A corner too tight to round at the truck own turning radius has no
+    nav2 error code, because nav2 was never asked. The note has to carry
+    the WHY on its own.
+    """
+    note = nav2_watch.CHAIN_REFUSED_NOTE
+    assert note.startswith("blocked: ")
+    assert "polyline" in note
+    assert "error_code" not in note

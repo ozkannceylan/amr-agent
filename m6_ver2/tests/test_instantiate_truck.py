@@ -758,8 +758,16 @@ def test_the_leg_table_and_the_derived_config_name_the_same_trees(built):
     """
     import nav2_legs
     root, _ = built
-    keys = sorted({key for _controller, key in nav2_legs.CLASS_TREE.values()})
+    # AND SINCE AMENDMENTS 9 ONE ROW NAMES NO TREE AT ALL. The ring
+    # chain is a FollowPath at the controller_server, so there is no BT
+    # XML in its path; the None is skipped BY NAME rather than by the
+    # table omitting the class, and it is asserted here so that a row
+    # quietly losing its tree cannot pass as the chain.
+    keys = sorted({key for _controller, key in nav2_legs.CLASS_TREE.values()
+                   if key is not None})
     assert keys == ["nav.bt_xml_rpp", "nav.bt_xml_station"]
+    assert [name for name, (_c, key) in nav2_legs.CLASS_TREE.items()
+            if key is None] == [nav2_legs.RING_CHAIN]
     for vid in VIDS:
         nav = _cfg(root, vid)["nav"]
         for key in keys + ["nav.bt_xml"]:
@@ -783,7 +791,12 @@ def test_mppi_stays_configured_though_no_leg_class_names_it(built):
     """
     import nav2_legs
     root, _ = built
-    named = sorted({key for _c, key in nav2_legs.CLASS_TREE.values()})
+    # THE ROWS THAT NAME A TREE. Since SPEC_ADAPTER.md AMENDMENTS 9
+    # the ring chain names none - it is a FollowPath straight at the
+    # controller_server, with no BT XML in the path at all - so it is
+    # skipped BY NAME here rather than by the table omitting it.
+    named = sorted({key for _c, key in nav2_legs.CLASS_TREE.values()
+                    if key is not None})
     for vid in VIDS:
         params = _controller_server(root, vid)
         assert params["controller_plugins"] == ["FollowPath", "FollowPathRPP"]

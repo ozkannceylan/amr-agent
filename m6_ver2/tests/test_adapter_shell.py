@@ -41,9 +41,11 @@ import instantiate_truck as itk                            # noqa: E402
 import nav2_adapter_node as shell                          # noqa: E402
 import nav2_envelope                                       # noqa: E402
 import nav2_legs                                           # noqa: E402
+import nav2_path                                           # noqa: E402
 import nav2_pose                                           # noqa: E402
 import nav2_seed                                           # noqa: E402
 import nav2_state                                          # noqa: E402
+import nav2_watch                                          # noqa: E402
 import scan_mask_node                                      # noqa: E402
 from stations import STATIONS                              # noqa: E402
 from status_contract import MODE_AUTO, VEHICLES, contract  # noqa: E402
@@ -157,14 +159,24 @@ class Handle(object):
 
 
 class Action(object):
+    #: A SHARED SEQUENCE ACROSS BOTH SERVERS (AMENDMENTS 9). There are
+    #: two goal servers now - navigate_to_pose and follow_path - and a
+    #: test that asks "was the RUNNING goal cancelled" means whichever
+    #: of them the adapter last sent to. One counter answers that
+    #: without either fake having to know about the other.
+    seq = 0
+
     def __init__(self, name):
         self.name = name
         self.goals = []
         self.handles = []
         self.cancels = 0
         self.accept = True
+        self.last_seq = -1
 
     def send_goal_async(self, goal):
+        Action.seq += 1
+        self.last_seq = Action.seq
         self.goals.append(goal)
         handle = Handle(self, accepted=self.accept)
         self.handles.append(handle)
@@ -222,7 +234,13 @@ class Messages(object):
     SUCCEEDED, CANCELED, ABORTED = 4, 5, 6
 
     def __init__(self):
+        # THE TWO GOAL SERVERS, KEYED BY THEIR ADDRESS (AMENDMENTS 9).
+        # `action` stays as the NavigateToPose one so that every test
+        # written before the chain existed still reads the server it
+        # meant, and `follow` is the new one.
+        self.actions = {}
         self.action = None
+        self.follow = None
 
     def type_of(self, name):
         return name
@@ -231,8 +249,13 @@ class Messages(object):
         return (depth, latched)
 
     def action_client(self, node, kind, name):
-        self.action = Action(name)
-        return self.action
+        client = Action(name)
+        self.actions[name] = client
+        if name == "follow_path":
+            self.follow = client
+        else:
+            self.action = client
+        return client
 
     def tf_sample(self, transform):
         return transform.sample
@@ -252,6 +275,13 @@ class Messages(object):
     def nav_goal(self, frame_id, stamp, map_pose, behavior_tree):
         return {"frame_id": frame_id, "map_pose": map_pose,
                 "behavior_tree": behavior_tree}
+
+    def chain_goal(self, frame_id, stamp, map_poses, controller_id,
+                   goal_checker_id, progress_checker_id):
+        return {"frame_id": frame_id, "map_poses": list(map_poses),
+                "controller_id": controller_id,
+                "goal_checker_id": goal_checker_id,
+                "progress_checker_id": progress_checker_id}
 
     def result_of(self, result):
         # The real assembler's line, character for character.
@@ -350,7 +380,41 @@ class Rig(object):
 
     @property
     def action(self):
+        """The server the adapter last sent a goal to.
+
+        TWO SERVERS SINCE AMENDMENTS 9. A ring chain goes out on
+        follow_path and a manoeuvre on navigate_to_pose, and almost
+        every test below is asking about THE RUNNING GOAL rather than
+        about a particular server - so this follows the goal.
+        """
+        live = [client for client in self.msgs.actions.values()
+                if client.goals]
+        if not live:
+            return self.msgs.action
+        return max(live, key=lambda client: client.last_seq)
+
+    @property
+    def navigate(self):
+        """The NavigateToPose server: the two manoeuvre classes."""
         return self.msgs.action
+
+    @property
+    def follow(self):
+        """The FollowPath server: the ring chain, and nothing else."""
+        return self.msgs.follow
+
+    def override_legs(self, legs, current_yaw=math.pi):
+        """Install a hand-built leg queue and dispatch its first leg.
+
+        NO ROUTE ON THIS FLOOR PRODUCES TWO NavigateToPose LEGS ANY MORE
+        (AMENDMENTS 9: the ring is one chain, and both manoeuvre classes
+        are driven to their own goals). The preemption machinery is
+        still the contract - PREEMPT_AT_M, should_preempt and both doors
+        of _advance_to - so the tests that pin it drive it here,
+        directly, instead of pretending a route can still build one.
+        """
+        self.adapter.legs = list(legs)
+        self.adapter._send_leg(0, current_yaw)
 
 
 #: A released polyline that ends on station S1 - so the split is a
@@ -358,15 +422,40 @@ class Rig(object):
 #: exists for.
 TO_S1 = [(-17.0, 10.0), (-13.0, 10.0), (-13.0, 4.25)]
 
-#: TWO TRANSIT LEGS, split at a junction turn and ending nowhere in
-#: particular. It is the OTHER shape, and it has to be a second route
-#: rather than a second reading of the first: TO_S1 ends in a BAY, so
-#: its leg switch changes the behaviour tree and nav2 refuses to preempt
-#: across it (see _advance_to). True preemption - the thing
-#: PREEMPT_AT_M was measured for - only ever happens between legs that
-#: SHARE A TREE, and since SPEC_ADAPTER.md AMENDMENTS 4 that is every
-#: pair except the last one into a bay.
+#: THE SAME RING RUN, WHICH IS NOW ONE CHAIN. It is kept as a route so
+#: that the state machine, the watchdog and the arrival have something
+#: real underneath the hand-built queues below.
 TWO_TRANSITS = [(-17.0, 10.0), (-13.0, 10.0), (-13.0, -10.0)]
+
+
+def _leg(klass, points, final=False):
+    """One leg of one class, built by hand.
+
+    NO ROUTE ON THIS FLOOR PRODUCES A TRANSIT ANY MORE (AMENDMENTS 9:
+    the ring collapses into a chain), so the preemption machinery -
+    which is still the contract, and still what a class that earns a
+    hand-over at P would be built on - is driven off queues made here.
+    """
+    controller, tree_key = nav2_legs.controller_for(klass)
+    points = [tuple(p) for p in points]
+    return nav2_legs.Leg(points=points, start=points[0], end=points[-1],
+                         goal=nav2_legs.goal_point(points[-1], klass),
+                         klass=klass, controller=controller,
+                         tree_key=tree_key, final=final)
+
+
+def _two_transits():
+    """TWO_TRANSITS as it used to split: two legs, one tree."""
+    return [_leg(nav2_legs.TRANSIT, [(-17.0, 10.0), (-13.0, 10.0)]),
+            _leg(nav2_legs.TRANSIT, [(-13.0, 10.0), (-13.0, -10.0)],
+                 final=True)]
+
+
+def _transit_then_bay():
+    """TO_S1 as it used to split: a transit and a bay, TWO trees."""
+    return [_leg(nav2_legs.TRANSIT, [(-17.0, 10.0), (-13.0, 10.0)]),
+            _leg(nav2_legs.STATION_SPUR, [(-13.0, 10.0), (-13.0, 4.25)],
+                 final=True)]
 
 
 @pytest.fixture
@@ -387,12 +476,35 @@ def driving(rig):
 
 @pytest.fixture
 def transiting(rig):
-    """The same truck on TWO_TRANSITS - one class, so one tree."""
+    """The same truck on TWO hand-built transit legs - one class, one tree.
+
+    THE ROUTE IS REAL AND THE QUEUE IS NOT (AMENDMENTS 9). The state
+    machine, the watchdog and the arrival all need a route underneath
+    them; what no route can still build is two NavigateToPose legs in a
+    row, and that is the shape the preemption tests are about.
+    """
     rig.mode()
     rig.tf_at(-17.0, 10.0)
     rig.status()
     rig.tick()
     rig.route(TWO_TRANSITS)
+    rig.override_legs(_two_transits())
+    return rig
+
+
+@pytest.fixture
+def two_trees(rig):
+    """The truck on a hand-built transit -> station-spur queue.
+
+    The one boundary nav2 itself refuses to preempt across, which is the
+    reason _advance_to has two doors at all.
+    """
+    rig.mode()
+    rig.tf_at(-17.0, 10.0)
+    rig.status()
+    rig.tick()
+    rig.route(TO_S1)
+    rig.override_legs(_transit_then_bay())
     return rig
 
 
@@ -531,46 +643,113 @@ def test_acceptance_sets_en_route_synchronously(driving):
     assert driving.adapter.state.goal == "ORD-1"
 
 
-def test_the_first_leg_goes_out_with_its_own_tree(driving):
-    """Two legs, transit then station spur, and the classes pick trees.
+def test_the_first_leg_of_a_route_is_a_chain_on_follow_path(driving):
+    """AMENDMENTS 9, at the wire. The ring run is not a pose at all.
 
-    The transit leg's tree is the RPP one since AMENDMENTS 4; the bay's
-    is the RPP tree with the 0.25 m checker named. Two different files,
-    which is what makes the boundary below a cancel and not a preempt.
+    TO_S1 is a ring run and a bay, so the queue is a CHAIN and a station
+    spur - and the chain goes out on the OTHER action server, carrying
+    the path this adapter built off the granted polyline. No planner is
+    asked anything about it.
     """
     legs = driving.adapter.legs
-    assert [leg.klass for leg in legs] == [nav2_legs.TRANSIT,
+    assert [leg.klass for leg in legs] == [nav2_legs.RING_CHAIN,
                                            nav2_legs.STATION_SPUR]
-    assert len(driving.action.goals) == 1
-    goal = driving.action.goals[0]
+    assert len(driving.navigate.goals) == 0
+    assert len(driving.follow.goals) == 1
+    goal = driving.follow.goals[0]
     assert goal["frame_id"] == driving.cfg.s("frames.map")
-    assert goal["behavior_tree"].endswith(
-        os.path.basename(driving.cfg.s("nav.bt_xml_rpp")))
-    # THE GOAL IS IN THE MAP FRAME, and the leg end is in m6's world -
-    # so the registration has to have been applied. Round-tripping it is
-    # the cheapest check that it was applied the right way round: at
-    # -179.813 deg a rotation is very nearly its own inverse.
-    back = nav2_pose.to_world(driving.adapter.frame, goal["map_pose"][0],
-                              goal["map_pose"][1], goal["map_pose"][2])
-    assert back[0] == pytest.approx(-13.0, abs=1e-6)
-    assert back[1] == pytest.approx(10.0, abs=1e-6)
+    # ALL THREE IDS ARE NAMED - AMENDMENTS 2's lesson, paid once
+    # already: nav2_controller falls back on an empty id only when
+    # exactly one plugin is loaded, and this stack loads two checkers.
+    assert goal["controller_id"] == nav2_legs.CHAIN_CONTROLLER_ID
+    assert goal["goal_checker_id"] == nav2_legs.CHAIN_GOAL_CHECKER_ID
+    assert goal["progress_checker_id"] == nav2_legs.CHAIN_PROGRESS_CHECKER_ID
+    # THE PATH IS IN THE MAP FRAME, and the polyline is in m6's world -
+    # so the registration has to have been applied to every pose. Round-
+    # tripping the two ends is the cheapest check that it was applied
+    # the right way round: at -179.813 deg a rotation is very nearly its
+    # own inverse.
+    poses = goal["map_poses"]
+    assert len(poses) > 30
+    first = nav2_pose.to_world(driving.adapter.frame, *poses[0])
+    last = nav2_pose.to_world(driving.adapter.frame, *poses[-1])
+    assert first[0] == pytest.approx(-17.0, abs=1e-6)
+    assert first[1] == pytest.approx(10.0, abs=1e-6)
+    assert last[0] == pytest.approx(-13.0, abs=1e-6)
+    assert last[1] == pytest.approx(10.0, abs=1e-6)
+    # AND THE PATH IS STILL CUSP-FREE ON THE OTHER SIDE OF THE
+    # REGISTRATION. The transform is a rotation and a translation, so it
+    # cannot introduce one - but the path RPP reads is the transformed
+    # one, and it is the transformed one that has to be checked.
+    assert nav2_path.cusp_at(poses) is None
 
 
-def test_the_next_leg_is_decided_at_the_preempt_distance(driving):
+def test_a_ring_chain_is_never_preempted_at_p(driving):
+    """It is a goal on ANOTHER SERVER, so P has nothing to do here.
+
+    Before AMENDMENTS 9 this same route decided the next leg 1.5 m short
+    of the spur foot and cancelled for the tree change. The chain runs
+    to its own end against the 0.60 m general checker, and the bay goes
+    out on its RESULT (D9's door).
+    """
+    for offset in (nav2_legs.PREEMPT_AT_M + 0.5,
+                   nav2_legs.PREEMPT_AT_M - 0.1, 0.05):
+        driving.tf_at(-13.0 - offset, 10.0)
+        driving.tick()
+        assert driving.adapter.pending_leg is None, offset
+        assert len(driving.follow.goals) == 1, offset
+        assert len(driving.navigate.goals) == 0, offset
+        assert driving.follow.cancels == 0, offset
+
+
+def test_the_chain_finishing_sends_the_bay_through_the_result_door(driving):
+    """The chain SUCCEEDS at the spur foot; the station leg follows."""
+    driving.tf_at(-13.0, 10.0, -1.9)
+    driving.tick()
+    driving.follow.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED,
+        result=types.SimpleNamespace(error_code=0)))
+    assert len(driving.navigate.goals) == 1
+    assert driving.adapter.legs[driving.adapter.leg_i].final
+    assert driving.adapter.state.state == nav2_state.EN_ROUTE
+    assert driving.navigate.goals[0]["behavior_tree"].endswith(
+        os.path.basename(driving.cfg.s("nav.bt_xml_station")))
+
+
+def test_a_polyline_the_builder_refuses_is_a_named_block(rig):
+    """A corner too tight to round is not a silent stop.
+
+    It cannot be built out of route.py's own floor - the suite asserts
+    that over every station pair - so it is reached here the only way it
+    could ever be reached in the field: a polyline that is not this
+    floor's. Re-sending it would refuse the same way for ever, so the
+    fleet is told once and gets to requeue.
+    """
+    rig.mode()
+    rig.tf_at(-17.0, 10.0)
+    rig.status()
+    rig.tick()
+    rig.route([(-17.0, 10.0), (-13.0, 10.0), (-13.0, 10.5), (-17.0, 10.5)])
+    assert rig.adapter.state.state == nav2_state.BLOCKED
+    assert rig.adapter.state.note == nav2_watch.CHAIN_REFUSED_NOTE
+    assert len(rig.follow.goals) == 0
+
+
+def test_the_next_leg_is_decided_at_the_preempt_distance(two_trees):
     """P = 1.5 m, and it is nav2_legs' number rather than this shell's."""
-    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M - 0.5, 10.0)
-    driving.tick()
-    assert len(driving.action.goals) == 1
-    assert driving.adapter.pending_leg is None
-    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
-    driving.tick()
+    two_trees.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M - 0.5, 10.0)
+    two_trees.tick()
+    assert len(two_trees.navigate.goals) == 1
+    assert two_trees.adapter.pending_leg is None
+    two_trees.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    two_trees.tick()
     # THE DECISION IS TAKEN AT P. What it does with it depends on
-    # whether the tree changes, which for TO_S1 it does - see the test
-    # below for why nav2 will not take that as a preemption.
-    assert driving.adapter.pending_leg == 1
+    # whether the tree changes, which for this queue it does - see the
+    # test below for why nav2 will not take that as a preemption.
+    assert two_trees.adapter.pending_leg == 1
 
 
-def test_a_tree_change_is_a_cancel_and_then_a_send(driving):
+def test_a_tree_change_is_a_cancel_and_then_a_send(two_trees):
     """nav2 REFUSES a preemption that changes the behaviour tree.
 
     MEASURED LIVE, 2026-09-02, and quoted from bt_navigator's own log:
@@ -586,34 +765,34 @@ def test_a_tree_change_is_a_cancel_and_then_a_send(driving):
     So the transition is nav2's own: cancel, and send when the server
     says the old goal is off it - never on a timer.
     """
-    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
-    driving.tick()
+    two_trees.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    two_trees.tick()
     # 1. cancelled, and NOTHING new sent yet.
-    assert driving.action.cancels == 1
-    assert driving.action.handles[0].cancelled is True
-    assert len(driving.action.goals) == 1
-    assert driving.adapter.pending_leg == 1
+    assert two_trees.navigate.cancels == 1
+    assert two_trees.navigate.handles[0].cancelled is True
+    assert len(two_trees.navigate.goals) == 1
+    assert two_trees.adapter.pending_leg == 1
     # 2. more ticks change nothing: a leg already waiting is not
     #    cancelled a second time.
-    driving.tick()
-    driving.tick()
-    assert driving.action.cancels == 1
-    assert len(driving.action.goals) == 1
+    two_trees.tick()
+    two_trees.tick()
+    assert two_trees.navigate.cancels == 1
+    assert len(two_trees.navigate.goals) == 1
     # 3. the server reports the old goal finished, and only then.
-    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
+    two_trees.navigate.handles[0].result_future.fire(types.SimpleNamespace(
         status=Messages.CANCELED,
         result=types.SimpleNamespace(error_code=0)))
-    assert len(driving.action.goals) == 2
-    assert driving.adapter.pending_leg is None
-    assert driving.adapter.state.state == nav2_state.EN_ROUTE
+    assert len(two_trees.navigate.goals) == 2
+    assert two_trees.adapter.pending_leg is None
+    assert two_trees.adapter.state.state == nav2_state.EN_ROUTE
     # THE STATION TREE, because leg 2 is the spur into the bay:
     # nav2_legs.CLASS_TREE names the key and this shell only looks it
     # up in the config.
-    assert driving.action.goals[1]["behavior_tree"].endswith(
-        os.path.basename(driving.cfg.s("nav.bt_xml_station")))
+    assert two_trees.navigate.goals[1]["behavior_tree"].endswith(
+        os.path.basename(two_trees.cfg.s("nav.bt_xml_station")))
 
 
-def test_the_rejected_preemptions_own_abort_is_not_a_failure(driving):
+def test_the_rejected_preemptions_own_abort_is_not_a_failure(two_trees):
     """The same switch, when nav2 answers the cancel with ABORTED.
 
     A cancelled NavigateToPose does not always come back CANCELED - a
@@ -621,13 +800,13 @@ def test_the_rejected_preemptions_own_abort_is_not_a_failure(driving):
     had. Either way the goal is OFF the server, which is the only fact
     the pending leg is waiting for.
     """
-    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
-    driving.tick()
-    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
+    two_trees.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    two_trees.tick()
+    two_trees.navigate.handles[0].result_future.fire(types.SimpleNamespace(
         status=Messages.ABORTED,
         result=types.SimpleNamespace(error_code=0)))
-    assert driving.adapter.state.state == nav2_state.EN_ROUTE
-    assert len(driving.action.goals) == 2
+    assert two_trees.adapter.state.state == nav2_state.EN_ROUTE
+    assert len(two_trees.navigate.goals) == 2
 
 
 def test_true_preemption_still_runs_between_legs_of_one_class(transiting):
@@ -639,29 +818,29 @@ def test_true_preemption_still_runs_between_legs_of_one_class(transiting):
     """
     transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M - 0.5, 10.0)
     transiting.tick()
-    assert len(transiting.action.goals) == 1
+    assert len(transiting.navigate.goals) == 1
     transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
     transiting.tick()
-    assert len(transiting.action.goals) == 2
-    assert transiting.action.cancels == 0
+    assert len(transiting.navigate.goals) == 2
+    assert transiting.navigate.cancels == 0
     assert transiting.adapter.pending_leg is None
-    assert transiting.action.goals[1]["behavior_tree"].endswith(
+    assert transiting.navigate.goals[1]["behavior_tree"].endswith(
         os.path.basename(transiting.cfg.s("nav.bt_xml_rpp")))
 
 
-def test_a_cancel_takes_the_waiting_leg_with_it(driving):
+def test_a_cancel_takes_the_waiting_leg_with_it(two_trees):
     """A pending leg that outlived the route would be a goal nobody
     asked for, sent after the door that asked for it had closed."""
-    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
-    driving.tick()
-    assert driving.adapter.pending_leg == 1
-    driving.send("auto/goal", types.SimpleNamespace(data=""))
-    assert driving.adapter.pending_leg is None
-    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
+    two_trees.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    two_trees.tick()
+    assert two_trees.adapter.pending_leg == 1
+    two_trees.send("auto/goal", types.SimpleNamespace(data=""))
+    assert two_trees.adapter.pending_leg is None
+    two_trees.navigate.handles[0].result_future.fire(types.SimpleNamespace(
         status=Messages.CANCELED,
         result=types.SimpleNamespace(error_code=0)))
-    assert len(driving.action.goals) == 1
-    assert driving.adapter.state.state == nav2_state.IDLE
+    assert len(two_trees.navigate.goals) == 1
+    assert two_trees.adapter.state.state == nav2_state.IDLE
 
 
 def test_a_preempted_legs_abort_is_not_a_failure(transiting):
@@ -674,8 +853,8 @@ def test_a_preempted_legs_abort_is_not_a_failure(transiting):
     """
     transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
     transiting.tick()
-    assert len(transiting.action.handles) == 2
-    transiting.action.handles[0].result_future.fire(types.SimpleNamespace(
+    assert len(transiting.navigate.handles) == 2
+    transiting.navigate.handles[0].result_future.fire(types.SimpleNamespace(
         status=Messages.ABORTED,
         result=types.SimpleNamespace(error_code=106)))
     assert transiting.adapter.state.state == nav2_state.EN_ROUTE
@@ -695,7 +874,9 @@ def test_a_refused_goal_is_blocked_and_not_silent(rig):
     rig.tf_at(-17.0, 10.0)
     rig.status()
     rig.tick()
-    rig.msgs.action.accept = False
+    # THE CHAIN'S SERVER, because that is the one a route reaches first
+    # since AMENDMENTS 9.
+    rig.follow.accept = False
     rig.route(TO_S1)
     assert rig.adapter.state.state == nav2_state.BLOCKED
     assert "error_code -1" in rig.adapter.state.note
@@ -770,15 +951,17 @@ def test_the_speed_limit_is_republished_on_change(rig):
 def _on_the_station_spur(driving):
     """Drive the fixture route to its FINAL leg and hand back the handle.
 
-    The station spur is the only leg allowed to run to completion, so it
-    is the only one whose SUCCEEDED reaches the arrival verdict at all.
+    The station spur is the last of TWO objects since AMENDMENTS 9: the
+    chain runs to the spur foot on follow_path, and the bay goes out on
+    navigate_to_pose when the chain's own result lands (D9's door).
     """
-    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    driving.tf_at(-13.0, 10.0)
     driving.tick()
-    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
-        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
+    driving.follow.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED,
+        result=types.SimpleNamespace(error_code=0)))
     assert driving.adapter.legs[driving.adapter.leg_i].final
-    return driving.action.handles[1]
+    return driving.navigate.handles[0]
 
 
 def test_a_boundary_arrival_is_an_arrival_and_not_a_block(driving):
@@ -1046,9 +1229,15 @@ def _goal_yaw(rig, index):
     """The world-frame heading of goal `index`, off the wire it went out
     on - through the registration, the same way round the adapter put it
     there."""
-    goal = rig.action.goals[index]
+    goal = rig.navigate.goals[index]
     return nav2_pose.to_world(rig.adapter.frame, goal["map_pose"][0],
                               goal["map_pose"][1], goal["map_pose"][2])[2]
+
+
+def _chain_yaw(rig, index=0, pose=0):
+    """The world-frame orientation of one pose of chain goal `index`."""
+    goal = rig.follow.goals[index]
+    return nav2_pose.to_world(rig.adapter.frame, *goal["map_poses"][pose])[2]
 
 
 def _turn(goal_yaw, current_yaw):
@@ -1076,21 +1265,24 @@ def test_the_first_goal_of_a_route_carries_the_trucks_own_yaw(rig):
     rig.status()
     rig.tick()
     rig.route(TO_S1)
-    assert rig.adapter.legs[0].klass == nav2_legs.TRANSIT
-    assert _turn(_goal_yaw(rig, 0), math.pi) < 1e-6
+    assert rig.adapter.legs[0].klass == nav2_legs.RING_CHAIN
+    # THE CHAIN CARRIES THE ANSWER ON EVERY POSE (AMENDMENTS 9) - the
+    # same D7 comparison, resolved once at dispatch and then spent.
+    assert _turn(_chain_yaw(rig), math.pi) < 1e-6
+    assert _turn(_chain_yaw(rig, pose=-1), math.pi) < 1e-6
 
 
 def test_the_first_goal_follows_the_yaw_and_is_not_a_constant(rig):
     """The same door, the same route, a truck pointing the other way -
-    and the goal moves with it. A fixed answer would pass the test
-    above and still be D7."""
+    and the path's orientations move with it. A fixed answer would pass
+    the test above and still be D7."""
     rig.mode()
     rig.tf_at(-17.0, 10.0, 0.2)
     rig.status()
     rig.tick()
     rig.route(TO_S1)
-    assert _turn(_goal_yaw(rig, 0), 0.2) == pytest.approx(0.2, abs=1e-6)
-    assert abs(follower.norm_ang(_goal_yaw(rig, 0))) < 1e-6
+    assert _turn(_chain_yaw(rig), 0.2) == pytest.approx(0.2, abs=1e-6)
+    assert abs(follower.norm_ang(_chain_yaw(rig))) < 1e-6
 
 
 def test_the_preempted_leg_is_built_on_the_yaw_at_the_preempt(transiting):
@@ -1103,8 +1295,8 @@ def test_the_preempted_leg_is_built_on_the_yaw_at_the_preempt(transiting):
     """
     transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0, -0.4)
     transiting.tick()
-    assert len(transiting.action.goals) == 2
-    assert transiting.action.cancels == 0
+    assert len(transiting.navigate.goals) == 2
+    assert transiting.navigate.cancels == 0
     south = _goal_yaw(transiting, 1)
     assert _turn(south, -0.4) <= math.pi / 2.0
     assert abs(follower.norm_ang(south + math.pi / 2.0)) < 1e-6
@@ -1119,76 +1311,68 @@ def test_the_preempted_leg_takes_the_flip_when_the_yaw_asks_for_it(
     assert abs(follower.norm_ang(north - math.pi / 2.0)) < 1e-6
 
 
-def test_the_leg_after_a_bay_mouth_is_built_on_the_yaw_at_the_SEND(rig):
-    """DOOR 3 by another name - defect D10's door, which is nav2's
-    SUCCEEDED rather than a cancel.
+def test_the_chain_out_of_a_bay_starts_in_the_bay(rig):
+    """DEFECT D15, ON THE SHELL. There is no goal at the mouth at all.
 
-    Inside P the spur exit is NOT handed over: no cancel, no pending
-    leg, no second goal. It runs to its own goal, RPP decelerates into
-    it, and the next leg starts when nav2 says the old one finished.
-    The truck is still rolling through that (a tricycle takes 0.208 m
-    to stop), so the goal is built on the yaw at the SEND: here it
-    swings from -1.3 to -1.9 in between, which crosses the quarter turn
-    and changes the answer from 0.0 to pi.
+    The first cut of AMENDMENTS 9 stopped the truck at the mouth on the
+    bay's heading and then handed it a chain running east - a carrot
+    across its own body axis, a curvature demand of 2.1 to 2.9 1/m
+    against a 1.25 m minimum radius, and an orbit at the steer stop
+    (run 17). The chain now starts IN THE BAY: one goal, one path, the
+    mouth rounded inside it, and the truck leaving dead astern along its
+    own axis.
     """
     _at_s1(rig, float(STATIONS["S1"]["yaw"]))
     rig.route(OUT_OF_S1)
-    # THREE LEGS SINCE D12: the 13 m ring leg is opened by its own
-    # alignment leg, which is collinear with it and therefore takes the
-    # same goal heading - so the yaw this test is about is unchanged.
-    assert [leg.klass for leg in rig.adapter.legs] == [
-        nav2_legs.SPUR_EXIT, nav2_legs.ALIGN, nav2_legs.TRANSIT]
-    # ONE TREE, SO NAV2 WOULD ALLOW THE PREEMPTION. The refusal is ours.
-    assert rig.adapter.legs[0].tree_key == rig.adapter.legs[1].tree_key
-    rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.3)
-    rig.tick()
-    rig.tf_at(-13.0, 10.0 - 0.2, -1.3)
-    rig.tick()
-    assert rig.adapter.pending_leg is None
-    assert rig.action.cancels == 0
-    assert len(rig.action.goals) == 1
-    # the truck rolls to a stop while nav2 finishes with the goal
-    rig.tf_at(-13.0, 10.0, -1.9)
-    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
-        status=Messages.SUCCEEDED,
-        result=types.SimpleNamespace(error_code=0)))
-    assert len(rig.action.goals) == 2
-    east = _goal_yaw(rig, 1)
-    assert abs(follower.norm_ang(east - math.pi)) < 1e-6
-    assert _turn(east, -1.9) <= math.pi / 2.0
+    assert [leg.klass for leg in rig.adapter.legs] == [nav2_legs.RING_CHAIN]
+    assert len(rig.navigate.goals) == 0
+    assert len(rig.follow.goals) == 1
+    poses = rig.follow.goals[0]["map_poses"]
+    head = nav2_pose.to_world(rig.adapter.frame, *poses[0])
+    assert head[0] == pytest.approx(-13.0, abs=1e-6)
+    assert head[1] == pytest.approx(4.25, abs=1e-6)
+    # DEAD ASTERN: the sense is the one the truck is already standing
+    # in, so nothing is asked of a standing truck (D5, D7, D15).
+    assert _turn(_chain_yaw(rig), float(STATIONS["S1"]["yaw"])) < 1e-6
+    # ... and the mouth is a rounded corner in the middle of it, not an
+    # end: no pose sits ON the vertex, and none is more than the arc's
+    # sagitta off the granted line.
+    world = [nav2_pose.to_world(rig.adapter.frame, *p)[:2] for p in poses]
+    assert min(math.dist(p, (-13.0, 10.0)) for p in world) > 0.4
+    worst = max(nav2_path.offset_from_polyline(p, OUT_OF_S1) for p in world)
+    assert worst < 0.50, worst
 
 
-def test_the_alignment_leg_hands_the_long_goal_over_in_motion(rig):
-    """AMENDMENTS 8, ON THE SHELL. D10's stop is at the MOUTH only.
+def test_the_ring_run_off_a_mouth_is_one_goal_and_never_a_second(rig):
+    """WHAT AMENDMENTS 9 AND D15 REPLACED THE ALIGNMENT LEG WITH.
 
-    Out of S1: spur exit to the mouth (a stop, nav2's own SUCCEEDED),
-    then the alignment leg, then 13 m of ring east. Run 15 measured the
-    alignment leg being driven to a position-only 0.60 m box and
-    completing mid-turn; it does not stop any more, so the long goal
-    leaves through the SAME door every other transit uses - a true
-    preemption, no cancel, and the truck still rolling.
+    Out of S1 the queue used to be a spur exit, an alignment leg and a
+    13 m transit: three goals, two boundaries, and run 16 lost three of
+    eight alignment legs to the two-sense tie at the mouth. It is ONE
+    path. Driving the whole route produces no further dispatch of any
+    kind - which is the property the tie needed to survive and no longer
+    has anywhere to live.
     """
     _at_s1(rig, float(STATIONS["S1"]["yaw"]))
-    rig.route(OUT_OF_S1)
-    assert [leg.klass for leg in rig.adapter.legs] == [
-        nav2_legs.SPUR_EXIT, nav2_legs.ALIGN, nav2_legs.TRANSIT]
-    # the mouth: driven to its own goal, so nav2 finishes it
-    rig.tf_at(-13.0, 10.0, -1.571)
-    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
-        status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
-    assert len(rig.action.goals) == 2
-    assert rig.adapter.legs[rig.adapter.leg_i].klass == nav2_legs.ALIGN
-    # ... and the alignment leg is superseded P short of its own end,
-    # with the truck moving. No cancel: one tree, a true preemption.
-    align_end = rig.adapter.legs[1].end
     rig.filtered(-0.30)
-    rig.tf_at(align_end[0] - nav2_legs.PREEMPT_AT_M + 0.1, align_end[1],
-              math.pi)
-    rig.tick()
-    assert len(rig.action.goals) == 3
-    assert rig.action.cancels == 0
+    rig.route(OUT_OF_S1)
+    assert [leg.klass for leg in rig.adapter.legs] == [nav2_legs.RING_CHAIN]
+    assert len(rig.follow.goals) == 1
+    assert rig.adapter.legs[rig.adapter.leg_i].klass == nav2_legs.RING_CHAIN
+    # ... and the whole 13 m ring run costs nothing more. No preempt, no
+    # cancel, no second path, and one decision in the entire leg.
+    # SHORT OF THE ARRIVAL RADIUS, deliberately: this test is about what
+    # happens WHILE the chain is driven, and the arrival is its own
+    # door (it cancels, run 14).
+    for step in ((-13.0, 8.0), (-13.0, 10.0), (-11.5, 10.0), (-8.0, 10.0),
+                 (-4.0, 10.0), (-1.4, 10.0), (-0.4, 10.0)):
+        rig.tf_at(step[0], step[1], math.pi)
+        rig.status()                      # the PLC keeps talking, too
+        rig.tick()
+    assert len(rig.follow.goals) == 1
+    assert len(rig.navigate.goals) == 0
+    assert rig.follow.cancels == 0
     assert rig.adapter.pending_leg is None
-    assert rig.adapter.legs[rig.adapter.leg_i].klass == nav2_legs.TRANSIT
 
 
 def test_the_leg_table_quotes_the_speed_the_handover_happened_at(rig):
@@ -1207,26 +1391,35 @@ def test_the_leg_table_quotes_the_speed_the_handover_happened_at(rig):
     rig.filtered(0.0)
     rig.route(OUT_OF_S1)
     assert "v=+0.000" in lines[0], lines[0]
+    # THE SAME SEAM ON A RE-SEND: the truck is rolling when a SAFETY-STOP
+    # resume re-dispatches the chain, and the line has to say so.
     rig.filtered(-0.301)
-    rig.tf_at(-13.0, 10.0, -1.571)
-    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
-        status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
-    dispatch = [line for line in lines if line.startswith("leg 2/3")]
-    assert len(dispatch) == 1, lines
-    assert "v=-0.301" in dispatch[0], dispatch[0]
-
-
-def test_the_same_leg_keeps_the_travel_direction_from_the_other_side(rig):
-    _at_s1(rig, float(STATIONS["S1"]["yaw"]))
-    rig.route(OUT_OF_S1)
-    rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.9)
+    rig.status(motor=False)
     rig.tick()
-    rig.tf_at(-13.0, 10.0, -1.3)
-    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
-        status=Messages.SUCCEEDED,
-        result=types.SimpleNamespace(error_code=0)))
-    assert len(rig.action.goals) == 2
-    assert abs(follower.norm_ang(_goal_yaw(rig, 1))) < 1e-6
+    rig.tf_at(-13.0, 8.0, -1.571)
+    rig.status(motor=True)
+    rig.tick()
+    dispatch = [line for line in lines if line.startswith("leg 1/1")]
+    assert len(dispatch) == 2, lines
+    assert "v=-0.301" in dispatch[1], dispatch[1]
+    # AND THE CHAIN TABLE CARRIES ITS OWN NUMBERS (AMENDMENTS 9): a path
+    # has four hundred poses and none of them is the decision, so the
+    # line quotes what the decision WAS.
+    assert "ring chain follow_path" in dispatch[1], dispatch[1]
+    for field in ("head=", "len=", "poses=", "corners=", "dropped=",
+                  "sense="):
+        assert field in dispatch[1], dispatch[1]
+
+
+def test_the_same_chain_keeps_the_travel_direction_from_the_other_side(rig):
+    """The truck standing in its bay POINTING OUT of it, which is the
+    other way a forklift can park: the sense follows, and it is the one
+    that asks it for no turn (D7)."""
+    _at_s1(rig, math.pi / 2.0)
+    rig.route(OUT_OF_S1)
+    assert len(rig.follow.goals) == 1
+    assert abs(follower.norm_ang(
+        _chain_yaw(rig) - math.pi / 2.0)) < 1e-6
 
 
 def test_the_last_leg_into_a_bay_cancels_for_the_tree_and_not_the_mouth(
@@ -1252,19 +1445,20 @@ def test_the_last_leg_into_a_bay_cancels_for_the_tree_and_not_the_mouth(
     rig.tick()
     rig.route(TO_S1)
     assert [leg.klass for leg in rig.adapter.legs] == [
-        nav2_legs.TRANSIT, nav2_legs.STATION_SPUR]
+        nav2_legs.RING_CHAIN, nav2_legs.STATION_SPUR]
     rig.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0, -1.3)
     rig.tick()
-    assert rig.adapter.pending_leg == 1
-    assert rig.action.cancels == 1
-    assert len(rig.action.goals) == 1
-    # the truck turns into the bay while the cancelled goal is still on
-    # the server
+    # THE CHAIN IS NOT PREEMPTED AT P AT ALL SINCE AMENDMENTS 9 - it is
+    # on another server. What is unchanged is the SEAM: the bay goal is
+    # built when it is SENT and not when the boundary was reached.
+    assert rig.adapter.pending_leg is None
+    assert len(rig.navigate.goals) == 0
+    # the truck turns into the bay while the chain is still running
     rig.tf_at(-13.0, 9.0, -1.9)
-    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
-        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
-    assert len(rig.action.goals) == 2
-    assert _goal_yaw(rig, 1) == pytest.approx(float(STATIONS["S1"]["yaw"]),
+    rig.follow.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
+    assert len(rig.navigate.goals) == 1
+    assert _goal_yaw(rig, 0) == pytest.approx(float(STATIONS["S1"]["yaw"]),
                                               abs=1e-6)
     leg2 = [line for line in lines if "leg 2/2" in line]
     assert len(leg2) == 1
@@ -1280,7 +1474,7 @@ def test_a_resume_re_goals_on_where_the_truck_is_now(driving):
     over ends up somewhere else. The re-sent goal is built on the yaw at
     the RESUME, which is the only one that is true.
     """
-    assert len(driving.action.goals) == 1
+    assert len(driving.follow.goals) == 1
     driving.status(motor=False)
     driving.tick()
     assert driving.adapter.state.state == nav2_state.SAFETY_STOP
@@ -1288,9 +1482,9 @@ def test_a_resume_re_goals_on_where_the_truck_is_now(driving):
     driving.status(motor=True)
     driving.tick()
     assert driving.adapter.state.state == nav2_state.EN_ROUTE
-    assert len(driving.action.goals) == 2
-    assert abs(follower.norm_ang(_goal_yaw(driving, 1))) < 1e-6
-    assert _turn(_goal_yaw(driving, 1), 0.1) <= math.pi / 2.0
+    assert len(driving.follow.goals) == 2
+    assert abs(follower.norm_ang(_chain_yaw(driving, index=1))) < 1e-6
+    assert _turn(_chain_yaw(driving, index=1), 0.1) <= math.pi / 2.0
 
 
 def test_a_resume_with_no_belief_waits_instead_of_guessing(driving):
@@ -1305,12 +1499,12 @@ def test_a_resume_with_no_belief_waits_instead_of_guessing(driving):
     driving.status(motor=True)
     driving.tick()
     assert driving.adapter.state.state == nav2_state.SAFETY_STOP
-    assert len(driving.action.goals) == 1
+    assert len(driving.follow.goals) == 1
     # the belief comes back, and so does the truck
     driving.tf_at(-17.0, 10.0, math.pi)
     driving.tick()
     assert driving.adapter.state.state == nav2_state.EN_ROUTE
-    assert len(driving.action.goals) == 2
+    assert len(driving.follow.goals) == 2
 
 
 def test_every_goal_this_shell_builds_names_its_leg_in_the_log(rig):
@@ -1324,10 +1518,23 @@ def test_every_goal_this_shell_builds_names_its_leg_in_the_log(rig):
     _at_s1(rig, float(STATIONS["S1"]["yaw"]))
     rig.route(OUT_OF_S1)
     assert len(lines) == 1
-    assert "leg 1/3" in lines[0]
-    assert nav2_legs.SPUR_EXIT in lines[0]
-    assert "nav.bt_xml_rpp" in lines[0]
-    assert "-1.571" in lines[0]
+    assert "leg 1/1" in lines[0]
+    assert nav2_legs.RING_CHAIN in lines[0]
+    assert "follow_path" in lines[0]
+    assert "truck_yaw=-1.571" in lines[0]
+    # AND THE OTHER SHAPE, WHICH IS THE ONE WITH A TREE ON IT: the bay
+    # at the far end is still a NavigateToPose and still names its tree.
+    other = []
+    rig.node.get_logger = lambda: types.SimpleNamespace(
+        info=other.append, warn=other.append)
+    rig.route(TO_S1)
+    rig.tf_at(-13.0, 10.0, -1.3)
+    rig.tick()
+    rig.follow.handles[-1].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
+    bay = [line for line in other if nav2_legs.STATION_SPUR in line]
+    assert len(bay) == 1, other
+    assert "nav.bt_xml_station" in bay[0]
 
 
 # ----------------------------------------------------------------------
@@ -1361,17 +1568,15 @@ def test_the_last_leg_finishing_is_still_an_arrival_and_not_a_send(
         driving):
     """The final leg's SUCCEEDED is the arrival verdict and always was;
     D9 must not turn it into a goal nobody asked for."""
-    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
-    driving.tick()
-    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
-        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
-    assert len(driving.action.goals) == 2
+    handle = _on_the_station_spur(driving)
+    assert len(driving.navigate.goals) == 1
     driving.tf_at(-13.0, 4.25)
-    driving.action.handles[1].result_future.fire(types.SimpleNamespace(
+    handle.result_future.fire(types.SimpleNamespace(
         status=Messages.SUCCEEDED,
         result=types.SimpleNamespace(error_code=0)))
     assert driving.adapter.state.state == nav2_state.ARRIVED
-    assert len(driving.action.goals) == 2
+    assert len(driving.navigate.goals) == 1
+    assert len(driving.follow.goals) == 1
 
 
 # ----------------------------------------------------------------------
@@ -1389,7 +1594,7 @@ def test_the_last_leg_finishing_is_still_an_arrival_and_not_a_send(
 def test_the_bay_goal_that_leaves_is_the_point_advanced(driving):
     """The message is read off the action and put back through the map."""
     _on_the_station_spur(driving)
-    goal = driving.action.goals[-1]
+    goal = driving.navigate.goals[-1]
     assert goal["behavior_tree"].endswith(
         os.path.basename(driving.cfg.s("nav.bt_xml_station")))
     back = nav2_pose.to_world(driving.adapter.frame, goal["map_pose"][0],
@@ -1404,12 +1609,16 @@ def test_the_bay_goal_that_leaves_is_the_point_advanced(driving):
     assert back[2] == pytest.approx(float(STATIONS["S1"]["yaw"]), abs=1e-6)
 
 
-def test_a_transit_goal_still_leaves_on_its_own_end(driving):
-    """Only the bay aims past itself. The granted corridor is not moved."""
-    goal = driving.action.goals[0]
-    back = nav2_pose.to_world(driving.adapter.frame, goal["map_pose"][0],
-                              goal["map_pose"][1], goal["map_pose"][2])
-    assert driving.adapter.legs[0].klass == nav2_legs.TRANSIT
+def test_a_chain_still_ends_on_its_own_end(driving):
+    """Only the bay aims past itself. The granted corridor is not moved.
+
+    A chain has no goal to advance at all - what would be advanced is
+    the last pose of a path, and moving it would move the corridor. So
+    the last pose IS the spur foot the ledger granted, to the micron.
+    """
+    goal = driving.follow.goals[0]
+    back = nav2_pose.to_world(driving.adapter.frame, *goal["map_poses"][-1])
+    assert driving.adapter.legs[0].klass == nav2_legs.RING_CHAIN
     assert back[0] == pytest.approx(-13.0, abs=1e-6)
     assert back[1] == pytest.approx(10.0, abs=1e-6)
 
@@ -1429,13 +1638,18 @@ def test_the_leg_table_says_where_the_goal_went(rig):
     rig.status()
     rig.tick()
     rig.route(TO_S1)
-    rig.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0, -1.3)
+    rig.tf_at(-13.0, 10.0, -1.3)
     rig.tick()
-    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
-        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
+    rig.follow.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
     legs = [line for line in lines if line.startswith("leg ")]
     assert len(legs) == 2, legs
-    assert "end=(-13.00, 10.00) goal=(-13.00, 10.00)" in legs[0], legs[0]
+    # THE CHAIN LINE IS A DIFFERENT SHAPE AND SAYS SO (AMENDMENTS 9): it
+    # names the server, its own end, and the four numbers that are the
+    # decision - there is no single goal pose to print.
+    assert "ring chain follow_path end=(-13.00, 10.00)" in legs[0], legs[0]
+    assert "len=4.00 poses=41 corners=0 dropped=0" in legs[0], legs[0]
+    assert "sense=" in legs[0], legs[0]
     assert "end=(-13.00, 4.25) goal=(-13.00, 4.15)" in legs[1], legs[1]
 
 
