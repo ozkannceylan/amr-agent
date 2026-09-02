@@ -185,14 +185,83 @@ def test_the_ground_truth_line_is_marked_as_evidence_only():
     # enforce from here - it is about who SUBSCRIBES. What this file owes
     # the next reader is the reason the wire is open at all, written
     # beside the line that opens it.
+    #   AND THE LINE IS BUILT FROM THE m5v3 KEY NOW. m6's `gz_odom` was
+    # re-pointed at the adapter's estimate by
+    # m6_ver2/tools/fleet_odom_firewall.py, so bridging it would open a
+    # gz channel for a topic the ADAPTER publishes.
     with open(_LAUNCH_FILE, "r", encoding="utf-8") as handle:
         body = handle.read()
-    head, sep, _ = body.partition('add(left["gz_odom"]')
+    head, sep, _ = body.partition('add(right["odom_ground_truth"]')
     assert sep, "the ground-truth bridge line moved"
-    tail = head[-900:]
+    tail = head[-1200:]
     assert "EVIDENCE ONLY" in tail.upper()
     assert "Decision 4" in tail
     assert "score_run.py" in tail
+    assert 'add(left["gz_odom"]' not in body
+
+
+# ----------------------------------------------------------------------
+# the ground-truth firewall - SPEC_ADAPTER.md Decision 4
+# ----------------------------------------------------------------------
+
+def test_the_fleet_key_reads_the_estimate_and_the_bridge_reads_the_truth(
+        whole_table):
+    """THE TWO HALVES, AND THEY MUST NOT BE THE SAME TOPIC.
+
+    vda_agent.py and hmi_node.py subscribe m6's `topics.gz_odom`; the
+    firewall points it at the adapter's estimate so route progress is
+    counted on the pose the vehicle can actually see. The truth is still
+    bridged for scoring, under the m5v3 family's own name.
+    """
+    import fleet_odom_firewall as firewall
+    for vid in whole_table._VIDS:
+        est = firewall.est_odom_topic(vid)
+        truth = firewall.truth_odom_topic(vid)
+        assert est != truth
+        assert whole_table._M6_TOPICS[vid]["gz_odom"] == est
+        assert whole_table._M6V2_TOPICS[vid]["odom_ground_truth"] == truth
+        # the truth is on the wire, the estimate is NOT bridged from gz:
+        # the adapter is its only publisher.
+        assert truth in topics_of(whole_table._BRIDGE_ARGS)
+        assert est not in topics_of(whole_table._BRIDGE_ARGS)
+
+
+def test_an_unfirewalled_fleet_config_refuses_the_world(one_truck):
+    """The failure this check exists for is SILENT.
+
+    An m6 derivation re-run without the firewall - one `python3
+    m6/tools/instantiate_vehicle.py --all` - puts the ground truth back
+    under the key the fleet reads. Nothing errors: the world comes up,
+    the trucks drive, and route progress is counted with an instrument
+    no real truck has.
+    """
+    import fleet_odom_firewall as firewall
+    m6 = {"f1": dict(one_truck._M6_TOPICS["f1"])}
+    m6v2 = {"f1": dict(one_truck._M6V2_TOPICS["f1"])}
+    m6["f1"]["gz_odom"] = firewall.truth_odom_topic("f1")
+    with pytest.raises(RuntimeError) as caught:
+        one_truck.agree(("f1",), m6, m6v2, one_truck._SCAN_FMTS)
+    assert "ESTIMATE" in str(caught.value)
+    assert "fleet_odom_firewall" in str(caught.value)
+
+
+def test_a_truth_key_that_moved_on_the_m5v3_side_refuses_the_world(one_truck):
+    """The bridge takes the truth from THAT key now, so it is checked."""
+    m6 = {"f1": dict(one_truck._M6_TOPICS["f1"])}
+    m6v2 = {"f1": dict(one_truck._M6V2_TOPICS["f1"])}
+    m6v2["f1"]["odom_ground_truth"] = "/f1/est/odom"
+    with pytest.raises(RuntimeError) as caught:
+        one_truck.agree(("f1",), m6, m6v2, one_truck._SCAN_FMTS)
+    assert "ground truth keeps its name" in str(caught.value)
+
+
+def test_the_odom_pair_is_no_longer_a_shared_wire(one_truck):
+    """SHARED_WIRES is "names the two families spell the same way", and
+    after the firewall the odom pair is deliberately not one of them."""
+    keys = [pair[0] for pair in one_truck.SHARED_WIRES]
+    assert "gz_odom" not in keys
+    assert [pair[1] for pair in one_truck.SHARED_WIRES].count(
+        "odom_ground_truth") == 0
 
 
 def test_the_ground_truth_tf_topic_is_never_bridged(whole_table):

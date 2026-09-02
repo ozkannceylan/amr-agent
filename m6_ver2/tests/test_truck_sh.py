@@ -132,17 +132,19 @@ def test_the_namespace_array_carries_all_three_remaps():
 
 
 def test_the_one_shot_children_are_namespaced_too():
-    """nav2_seed is a gate rather than a stack child, and it is still ours.
+    """The GATES are not stack children, and they are still ours.
 
-    It runs in the foreground and is not in the pidfile, but it is a ROS
-    process on a shared graph: unnamespaced it would be /nav2_seed four
-    times over, and a hung one could not be swept by vid.
+    Both run in the foreground and neither is in the pidfile, but each
+    is a ROS process on a shared graph: unnamespaced they would be
+    /nav2_seed and /nav_plan_health four times over, and a hung one
+    could not be swept by vid.
     """
-    seed = [line for line in LINES
-            if "nav2_seed.py" in line and "python3" in line]
-    assert len(seed) == 1
-    assert '"${NS[@]}"' in seed[0]
-    assert "--vid" in seed[0]
+    for tool in ("nav2_seed.py", "nav_plan_health.py"):
+        gate = [line for line in LINES
+                if tool in line and "python3" in line]
+        assert len(gate) == 1, tool
+        assert '"${NS[@]}"' in gate[0], tool
+        assert "--vid" in gate[0], tool
 
 
 #: Every `-r` remap on a spawn line, as (match side, replacement).
@@ -228,6 +230,50 @@ def test_health_gate_addresses_are_namespaced():
         assert call.startswith("/$VID/"), call
     assert 'grep -q "^/$VID/$node$"' in TRUCK
     assert 'action="/$VID/navigate_to_pose"' in TRUCK
+
+
+def test_the_plan_gate_runs_after_the_answer_gate():
+    """CAN IT PLAN, not merely: is it ACTIVE.
+
+    Six ACTIVE lifecycle nodes and an advertised navigate action say
+    nothing about whether the planner has a COSTMAP to plan in - and on
+    this branch the grid is served ONCE, by a map_server the world owns,
+    latched for four late-joining static layers. A truck that missed
+    that publication comes up looking exactly like one that did not.
+      THE ORDER IS LOAD-BEARING: a plan gate run before the action is
+    advertised would time out over a stack that was merely slow.
+    """
+    body = re.search(r"(?ms)^\s*nav_can_answer\n\s*nav_can_plan\n", TRUCK)
+    assert body, "nav_can_plan does not follow nav_can_answer in start()"
+    assert TRUCK.count("nav_can_plan() {") == 1
+    plan = re.search(r"(?ms)^nav_can_plan\(\) \{.*?^\}", TRUCK).group(0)
+    assert "nav_plan_health.py" in plan
+    assert "STILL UP" in plan
+
+
+def test_the_third_tree_is_checked_on_disk_and_passed_to_nobody():
+    """The station tree travels in a GOAL, not on a command line.
+
+    bt_navigator's `default_nav_to_pose_bt_xml` is the primary tree;
+    the RPP and station trees are reached only through a
+    NavigateToPose goal's `behavior_tree` field, which the adapter
+    fills from nav2_legs.CLASS_TREE. So this script never passes them -
+    and it must still refuse if one is missing, because a goal naming a
+    tree bt_navigator cannot open fails forty metres into a drive and
+    reads to the operator as a nav fault.
+    """
+    assert 'NAV_BT_STATION="$M6V2_REPO/$CFG_NAV_BT_XML_STATION"' in TRUCK
+    checked = re.search(
+        r'(?ms)for file in "\$EKF_PARAMS".*?; do', TRUCK).group(0)
+    for name in ("$NAV_BT", "$NAV_BT_RPP", "$NAV_BT_STATION"):
+        assert '"{}"'.format(name) in checked, name
+    passed = [line for _, line in SPAWNS
+              if "default_nav_to_pose_bt_xml" in line]
+    assert len(passed) == 1
+    assert '-p default_nav_to_pose_bt_xml:="$NAV_BT"' in passed[0]
+    for line in [text for _, text in SPAWNS]:
+        assert "NAV_BT_RPP" not in line
+        assert "NAV_BT_STATION" not in line
 
 
 def test_amcl_reads_the_shared_map_and_the_masked_scan():

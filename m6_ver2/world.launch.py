@@ -60,6 +60,16 @@ WHAT THE BRIDGE CARRIES, AND WHY EACH LINE IS THERE.
   m6/tools/score_run.py can still score a run against the truth, and for
   no other reason. Its <tf_topic> is NOT bridged, so the ground-truth
   frames never reach /tf.
+    AND ITS NAME IS TAKEN FROM THE m5v3 FAMILY, NOT m6's. The firewall
+  is applied by m6_ver2/tools/fleet_odom_firewall.py, which re-points
+  m6's `topics.gz_odom` - the key vda_agent and the HMI subscribe - at
+  /<vid>/est/odom. So that key no longer names the truth, and this file
+  reads the truth off the OTHER derived config's
+  `topics.odom_ground_truth`, which is the m5v3 schema's own spelling of
+  the same wire and is read by nothing in the fleet path. The firewall
+  is CHECKED at import below rather than assumed: a world that came up
+  over an unfirewalled config would feed the fleet ground truth and look
+  exactly like a world that had not.
   NO IMAGE IS BRIDGED. Not the pallet camera (dark with docking), not
   the overhead camera m6_world.launch.py carries for its recording: an
   Image channel with no consumer is a claim this run does not make, and
@@ -126,6 +136,7 @@ import status_contract                                    # noqa: E402
 # `instantiate_truck.py --check` runs, so the launch and the operator
 # entrypoint cannot disagree about what "up to date" means.
 sys.path.insert(0, os.path.join(_HERE, "tools"))
+import fleet_odom_firewall                                # noqa: E402
 import instantiate_truck                                  # noqa: E402
 
 _ALL_VIDS = tuple(sorted(status_contract.VEHICLES))
@@ -290,11 +301,17 @@ _SCAN_FMTS = {vid: status_contract.contract(vid)["scan_topic"]
 SHARED_WIRES = (
     ("gz_actuator_steer_cmd", "steer_cmd"),
     ("gz_actuator_traction_cmd", "traction_cmd"),
-    ("gz_odom", "odom_ground_truth"),
     ("gz_scan_nav", "scan_nav"),
     ("gz_imu", "imu"),
     ("gz_joint_state", "joint_state"),
 )
+#: THE ODOM PAIR IS NOT IN THE LIST ANY MORE, AND THAT IS THE FIREWALL.
+#: m6's `gz_odom` and m5v3's `odom_ground_truth` named one wire until
+#: SPEC_ADAPTER.md Decision 4; now m6's key names the ESTIMATE the
+#: adapter publishes and only the m5v3 side still names the truth. They
+#: are deliberately different, so firewalled() below asserts the
+#: difference instead - a pair left in SHARED_WIRES would have refused
+#: this world every time the firewall was correctly applied.
 
 
 def agree(vids, m6_topics, m6v2_topics, scan_fmts):
@@ -317,6 +334,35 @@ def agree(vids, m6_topics, m6v2_topics, scan_fmts):
                        .format(vid, vid, m5v3_key, right.get(m5v3_key)),
                        "One of the two derivation tools has moved under the",
                        "other. NOTHING WAS STARTED.")
+        # THE FIREWALL, ASSERTED WHERE THE TWO FAMILIES MEET.
+        est = fleet_odom_firewall.est_odom_topic(vid)
+        truth = fleet_odom_firewall.truth_odom_topic(vid)
+        if left.get("gz_odom") != est:
+            refuse("the fleet's odom key reads the ESTIMATE",
+                   "SPEC_ADAPTER.md Decision 4 and "
+                   "m6_ver2/tools/fleet_odom_firewall.py",
+                   "{}: m6/vehicles/{}/config.yaml topics.gz_odom is {!r}"
+                   .format(vid, vid, left.get("gz_odom")),
+                   "and it has to be {!r}.".format(est),
+                   "vda_agent.py and hmi_node.py subscribe THAT key: "
+                   "unfirewalled,",
+                   "the fleet counts route progress on the simulator's "
+                   "own truth while",
+                   "the stack drives on an estimate, and the bridge below "
+                   "would open",
+                   "a gz channel for a topic the adapter publishes.",
+                   "NOTHING WAS STARTED. Apply it:",
+                   "  python3 m6_ver2/tools/fleet_odom_firewall.py --all")
+        if right.get("odom_ground_truth") != truth:
+            refuse("the ground truth keeps its name on the m5v3 side",
+                   "SPEC_ADAPTER.md Decision 4",
+                   "{}: m6_ver2/vehicles/{}/config.yaml "
+                   "topics.odom_ground_truth is {!r}, not {!r}"
+                   .format(vid, vid, right.get("odom_ground_truth"), truth),
+                   "That key is where the bridge below takes the truth "
+                   "from now that",
+                   "m6's key names the estimate. Without it the run has "
+                   "no evidence.")
         want = scan_fmts[vid].format("back")
         if right.get("safety_scan_back") != want:
             refuse("the back scanner has one name",
@@ -388,9 +434,14 @@ def bridge_args(vids, m6_topics, m6v2_topics, scan_fmts):
         # path may consume this; the estimate rides /<vid>/est/odom. It
         # is here so m6/tools/score_run.py can score the run against the
         # truth it hardcodes, and for no other reason.
-        add(left["gz_odom"],
+        #   THE NAME COMES FROM THE m5v3 SIDE. m6's `gz_odom` key is
+        # the one the firewall re-pointed at the estimate, so bridging
+        # it would open a gz channel for a topic the ADAPTER publishes -
+        # two publishers on the fleet's own pose source. agree() above
+        # has already refused unless this key still names the truth.
+        add(right["odom_ground_truth"],
             "{}@nav_msgs/msg/Odometry[gz.msgs.Odometry".format(
-                left["gz_odom"]))
+                right["odom_ground_truth"]))
         add(left["gz_scan_nav"],
             "{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"
             .format(left["gz_scan_nav"]))

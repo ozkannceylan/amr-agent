@@ -27,6 +27,16 @@ statement about a file that exists. So the blanket rule here is
 populations partition every `/forklift/` in the donor set exactly, and
 the tool checks that they still do before it rewrites anything.
 
+WHAT IS INSERTED, AND WHY AN INSERTION IS STILL A COUNTED REWRITE.
+Three of this branch's facts have no donor line to replace, so they are
+ADDED: nav2.yaml gains a second goal checker, config.yaml gains the key
+that names the third behaviour tree, and every behaviour tree gains one
+attribute on its FollowPath node. An addition is the one edit a count
+taken over the DONOR cannot see, so each is anchored on a key whose
+donor value is asserted first, counted in the manifest, and taken back
+out again by the inverse - which is what keeps the residue pin
+meaningful over files this tool made longer.
+
 COMMENTS ARE REWRITTEN WITH THE CODE. A derived ekf.yaml whose comment
 says `/forklift/gz/odom is the simulator's own pose` names a topic that
 does not exist in the m6v2 world. The donor's comments carry the
@@ -89,7 +99,7 @@ import sys
 TOOL = "instantiate_truck"
 # Bumped when the transform changes shape, so a manifest written by an
 # older tool is refused rather than trusted.
-TOOL_VERSION = "1"
+TOOL_VERSION = "2"
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _M6V2 = os.path.normpath(os.path.join(_HERE, ".."))
@@ -148,6 +158,47 @@ def masked_scan_topic(vid):
         refuse("the vid is a fleet vehicle id", "{} 3".format(SPEC),
                "{!r} is not one".format(vid))
     return MASKED_SCAN_TEMPLATE.format(vid=vid)
+
+
+# THE SECOND GOAL CHECKER, THE THIRD TREE, AND WHY ALL THREE TREES NOW
+# NAME A CHECKER BY ID (SPEC_ADAPTER.md Decision 2, M6V2-G1-B5).
+# A bay is 0.25 m of tolerance and an aisle is 0.60. One checker for
+# both would either stop the truck short of the bay or make every
+# transit leg crawl its last 0.35 m of open aisle, so the derived
+# controller_server declares TWO and only the final leg into a station
+# names the tighter one.
+#   AND THAT MAKES nav2's DEFAULT UNAVAILABLE, WHICH IS THE PART THAT
+#   HAD TO BE READ OUT OF THE INSTALLED BINARY RATHER THAN ASSUMED.
+#   nav2_controller 1.3.12's ControllerServer::findGoalCheckerId falls
+#   back to "the only plugin loaded" when a goal names none - but only
+#   when there IS only one. In
+#   /opt/ros/jazzy/lib/libcontroller_server_core.so the not-found branch
+#   loads the checker map's size and reads `cmp $0x1,%r15`, jumping to
+#   the warn-once path ("No goal checker was specified in parameter
+#   'current_goal_checker'. Server will use only plugin loaded %s")
+#   ONLY on equality; two checkers fall through to "FollowPath called
+#   with goal_checker name %s in parameter 'current_goal_checker', which
+#   does not exist" and return false, which the server reports as
+#   "Terminating action, invalid goal checker %s requested".
+#   AN EMPTY ID WOULD THEREFORE ABORT EVERY FollowPath ON THIS STACK the
+#   moment the second checker exists. So the transit trees are given the
+#   general checker BY NAME and the station tree the station one, and
+#   nothing on this branch relies on a nav2 default.
+STATION_CHECKER = "station_goal_checker"
+GENERAL_CHECKER = "general_goal_checker"
+
+#: controller_server's plugin list, before and after. GENERAL STAYS
+#: FIRST: it is the checker every transit leg runs and the one a reader
+#: meets first in the file. The order is pinned by test even though
+#: nav2 no longer resolves anything by it.
+DONOR_CHECKER_PLUGINS = '["{}"]'.format(GENERAL_CHECKER)
+DERIVED_CHECKER_PLUGINS = '["{}", "{}"]'.format(GENERAL_CHECKER,
+                                                STATION_CHECKER)
+
+#: The third tree's file name. It is the RPP tree with one attribute
+#: changed, exactly as the RPP tree is the primary tree with one
+#: attribute changed (m5_ver3/config.yaml's own note on nav.bt_xml_rpp).
+STATION_TREE = "navigate_to_pose_tricycle_v3_rpp_station.xml"
 
 
 def refuse(check, owner, *lines):
@@ -274,6 +325,91 @@ def set_value(text, index, dotted, name, expect, new):
     return "\n".join(lines)
 
 
+def insert_after(text, index, lines, dotted, name):
+    """Put `lines` immediately below one key's line.
+
+    UNDER A SCALAR AND NEVER ABOVE A BLOCK, and the anchors are chosen
+    for it: the line above a block key is that block's own comment
+    header, so an insertion made "before the next key" would land
+    between a paragraph and the key it describes. Every anchor this
+    tool uses is a scalar assignment whose donor value is asserted
+    first, and the block goes under it.
+    """
+    rows = text.split("\n")
+    carriage = "\r" if rows[index].endswith("\r") else ""
+    rows[index + 1:index + 1] = [line + carriage for line in lines]
+    return "\n".join(rows)
+
+
+def remove_block(text, lines, dotted, name):
+    """The inverse: take back exactly the lines that were inserted.
+
+    EXACTLY ONE OCCURRENCE OR IT REFUSES. The residue pin is the reason
+    this exists - an insertion is the one edit a count over the donor
+    cannot see - so a block that appears twice, or not at all, is a
+    derived file this tool did not write.
+    """
+    rows = text.split("\n")
+    carriage = "\r" if rows and rows[0].endswith("\r") else ""
+    want = [line + carriage for line in lines]
+    hits = [start for start in range(len(rows) - len(want) + 1)
+            if rows[start:start + len(want)] == want]
+    if len(hits) != 1:
+        refuse("every inserted block comes back out exactly once",
+               "{} 5".format(SPEC),
+               "{}: the block anchored under {} is in the derived file "
+               "{} times".format(name, dotted, len(hits)))
+    del rows[hits[0]:hits[0] + len(want)]
+    return "\n".join(rows)
+
+
+# --------------------------------------------------------------------
+# Step 3 - the behaviour trees' ONE attribute.
+#
+# The donor's FollowPath node names no goal_checker_id, which was right
+# while controller_server loaded one goal checker and is a stack-wide
+# abort the moment it loads two (see STATION_CHECKER above). So every
+# derived tree names one. `goal_checker_id` is FollowPath's OWN input
+# port - /opt/ros/jazzy/share/nav2_behavior_tree/nav2_tree_nodes.xml:124
+# declares it and nav2_msgs/action/FollowPath carries the field - so
+# this is nav2's mechanism and not a convention invented here.
+# --------------------------------------------------------------------
+
+_FOLLOW_PATH = re.compile(r"(<FollowPath\b)([^>]*?)(\s*/>)")
+_CHECKER_ATTR = ' goal_checker_id="{}"'
+
+
+def bt_goal_checker(body, checker, name):
+    """Name the goal checker on the tree's one FollowPath node."""
+    hits = _FOLLOW_PATH.findall(body)
+    if len(hits) != 1:
+        refuse("the tree has exactly one FollowPath node",
+               "SPEC_ADAPTER.md Decision 2",
+               "{} has {} of them. The goal checker is an attribute of "
+               "that node, and a tree with two is a tree with two "
+               "answers.".format(name, len(hits)))
+    if "goal_checker_id" in body:
+        refuse("the donor tree names no goal checker",
+               "SPEC_ADAPTER.md Decision 2",
+               "{} already carries a goal_checker_id, so the donor has "
+               "moved under this tool.".format(name))
+    out = _FOLLOW_PATH.sub(
+        lambda match: "{}{}{}{}".format(match.group(1), match.group(2),
+                                        _CHECKER_ATTR.format(checker),
+                                        match.group(3)), body, count=1)
+    return out, {"bt_goal_checker": 1}
+
+
+def unbt_goal_checker(body, checker, name):
+    attr = _CHECKER_ATTR.format(checker)
+    if body.count(attr) != 1:
+        refuse("the derived tree names its goal checker exactly once",
+               "SPEC_ADAPTER.md Decision 2",
+               "{}: {} appears {} times".format(name, attr.strip(),
+                                                body.count(attr)))
+    return body.replace(attr, "", 1)
+
+
 def locate(index_of, dotted, name):
     """One dotted key's line, out of a key_lines() index.
 
@@ -306,6 +442,14 @@ class Rule(object):
       spawn  - becomes VEHICLES[vid]["spawn"][axis]
       same   - asserted unchanged; a shared name, checked not ignored
       dark   - asserted unchanged; DEC-006 leaves it to the adapter
+      insert - asserted unchanged, and `target`'s lines are written
+               UNDER it. The one kind that makes the file longer, so it
+               runs in a pass of its own after every in-place rule has
+               used the line index, and the inverse takes it out again.
+               Its `donor` is the value the anchor holds WHEN THE BLOCK
+               GOES IN, which for an anchor another rule has already
+               rewritten is that rule's answer - so `{vid}` is expanded
+               in it, exactly as it is in a `set` target.
     """
 
     __slots__ = ("dotted", "kind", "donor", "target")
@@ -319,6 +463,19 @@ class Rule(object):
     @property
     def rewrites(self):
         return self.kind in ("frame", "topic", "set", "spawn")
+
+    @property
+    def inserts(self):
+        return self.kind == "insert"
+
+    def new_lines(self, vid):
+        """`target`'s lines with this truck's id in them.
+
+        `.replace` and not `.format`: these are yaml lines carrying
+        quotes, brackets and the odd brace, and a formatter would take
+        an interest in all of them.
+        """
+        return [line.replace("{vid}", vid) for line in self.target]
 
     def new_value(self, vid, spawn):
         if self.kind == "frame":
@@ -334,6 +491,110 @@ class Rule(object):
 
 def _derived(name):
     return "m6_ver2/vehicles/{vid}/" + name
+
+
+#: THE STATION CHECKER'S BLOCK, written under general_goal_checker's
+#: last line. It is the same plugin as the checker above it and the
+#: whole POSITION-ONLY argument is made there, at length, against two
+#: measured runs; what is different here is one number.
+STATION_CHECKER_BLOCK = (
+    "",
+    "    station_goal_checker:",
+    "      # THE SECOND CHECKER, ADDED BY m6_ver2/tools/"
+    "instantiate_truck.py",
+    "      # (SPEC_ADAPTER.md Decision 2). It is not in the m5_ver3 "
+    "donor:",
+    "      # that stack drove to approach poses in open corridors and "
+    "this",
+    "      # one drives into BAYS, which is the only leg that runs to",
+    "      # actual completion.",
+    "      #   REACHED BY THE STATION SPUR AND BY NOTHING ELSE. "
+    "nav2_legs.py",
+    "      # CLASS_TREE maps that one leg class onto the third tree, "
+    "whose",
+    "      # FollowPath names this id; transit legs name "
+    "general_goal_checker",
+    "      # and keep their 0.60 m box.",
+    "      plugin: \"nav2_controller::PositionGoalChecker\"",
+    "      # 0.25 m, AND IT IS THE FLEET'S OWN ARRIVAL RADIUS RATHER "
+    "THAN A",
+    "      # SECOND OPINION ABOUT ONE. m6/ipc/follower.py ARRIVE_M is "
+    "0.25",
+    "      # and every station in m6/ipc/stations.py declares arrive_m "
+    "0.25,",
+    "      # so the checker that finishes the goal and the adapter that",
+    "      # latches ARRIVED measure the same distance at the same "
+    "radius.",
+    "      #   AND IT IS REACHABLE ON THIS STACK: the CORRIDOR table "
+    "above",
+    "      # walked one approach and found the belief inside 0.2492 m "
+    "with",
+    "      # 0.3274 m of truth. What was NOT reachable was the heading, "
+    "and",
+    "      # this plugin does not ask for one.",
+    "      xy_goal_tolerance: 0.25",
+    "      # TRUE, for general_goal_checker's reason: this vehicle needs",
+    "      # 0.208 m to stop, so an unlatched box is a box it coasts out "
+    "of",
+    "      # and un-arrives from.",
+    "      stateful: true",
+)
+
+#: THE AMENDMENT TO THE RPP BLOCK, written under its last parameter.
+#: The donor's own paragraphs there were written when controller_server
+#: declared ONE goal checker and they say so in as many words; this file
+#: declares two, and RPP is the controller that runs the leg which
+#: reaches the tighter one. COMMENTS ARE REWRITTEN WITH THE CODE (see
+#: this module's header): a params file that still says "both
+#: controllers arrive on exactly the same 0.60 m box" is a file whose
+#: next reader will believe it.
+RPP_STATION_BOX_BLOCK = (
+    "",
+    "      # ---- THE GOAL BOX THIS CONTROLLER ASKS FOR, M6V2-G1-B5 ---",
+    "      # ADDED BY m6_ver2/tools/instantiate_truck.py, and it AMENDS",
+    "      # the donor paragraphs above and below, which were written",
+    "      # when controller_server declared ONE goal checker.",
+    "      #   THE MECHANISM IS UNCHANGED AND IT IS WHY THIS NOTE IS",
+    "      # NEEDED. RPP 1.3.12 has no goal tolerance of its own: it",
+    "      # ASKS the goal checker at every tick",
+    "      # (`goal_checker->getTolerances(...)`, :177) and uses the",
+    "      # answer. WHICH checker it asks is named by the FollowPath",
+    "      # node of the tree the GOAL carried, so this one controller",
+    "      # arrives on 0.60 m driving a spur EXIT and on 0.25 m",
+    "      # driving a station SPUR. The sentence below, that both",
+    "      # controllers meet ONE position-only box of 0.60 m, is",
+    "      # therefore the TRANSIT case - and it is no longer the only",
+    "      # case.",
+    "      #   AND approach_velocity_scaling_dist's ARITHMETIC HOLDS AT",
+    "      # THE TIGHTER BOX. Scaling linearly from 1.00 m of remaining",
+    "      # path, the speed at the edge of a 0.25 m box is",
+    "      # 0.300 * 0.25 = 0.075 m/s; the stop from there is",
+    "      # v^2/(2a) = 0.005625 / 0.70 = 0.008 m at navcmd.accel_mps2,",
+    "      # plus 0.25 s of measured chain dead time at 0.075 m/s =",
+    "      # 0.019 m, so 0.027 m in total against a 0.25 m box - about",
+    "      # a ninth of it, where the 0.60 m case spends a sixth.",
+)
+
+#: THE THIRD TREE'S KEY, written under nav.bt_xml_rpp's line. It does
+#: not exist in the donor - m5_ver3 had two trees and needed no third -
+#: so it is INSERTED, counted, and removed again by the residue pin.
+CONFIG_STATION_TREE_BLOCK = (
+    "",
+    "  # AND THE THIRD TREE, M6V2-G1-B5. It is bt_xml_rpp above with ONE",
+    "  # ATTRIBUTE ADDED: its FollowPath names goal_checker_id",
+    "  # station_goal_checker, so the final leg into a bay finishes on "
+    "the",
+    "  # 0.25 m box nav2.yaml declares while every transit leg keeps "
+    "0.60.",
+    "  #   THIS KEY IS NOT IN THE m5_ver3 DONOR. It is inserted by",
+    "  # m6_ver2/tools/instantiate_truck.py; "
+    "m6_ver2/nav2_adapter/nav2_legs.py",
+    "  # CLASS_TREE maps the station-spur leg class onto it, and the",
+    "  # adapter puts the path in the NavigateToPose goal's "
+    "behavior_tree",
+    "  # field - the same door bt_xml_rpp is reached through.",
+    '  bt_xml_station: "' + _derived(STATION_TREE) + '"',
+)
 
 
 CONFIG_RULES = [
@@ -401,6 +662,10 @@ CONFIG_RULES = [
     Rule("nav.bt_xml_rpp", "set",
          "m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3_rpp.xml",
          _derived("navigate_to_pose_tricycle_v3_rpp.xml")),
+    # ---- AND THE ONE KEY THE DONOR DOES NOT HAVE ----
+    Rule("nav.bt_xml_rpp", "insert",
+         _derived("navigate_to_pose_tricycle_v3_rpp.xml"),
+         CONFIG_STATION_TREE_BLOCK),
 
     # ---- THE POSE, from the one table that holds it ----
     Rule("vehicle.spawn.x", "spawn", "-17.00", "x"),
@@ -432,6 +697,18 @@ NAV2_RULES = [
          "scan.topic", "set", GZ_PREFIX + "scan_nav", MASKED_SCAN_TEMPLATE),
     Rule("global_costmap.global_costmap.ros__parameters.obstacle_layer."
          "scan.topic", "set", GZ_PREFIX + "scan_nav", MASKED_SCAN_TEMPLATE),
+    # ---- TWO GOAL CHECKERS, AND EVERY TREE NAMES THE ONE IT WANTS ----
+    # See STATION_CHECKER. The list rewrite and the block insertion are
+    # two halves of one change: a plugin named in the list and not
+    # declared below it is a controller_server that refuses to
+    # configure, and a block declared with nothing naming it is a
+    # plugin nav2 never loads.
+    Rule("controller_server.ros__parameters.goal_checker_plugins",
+         "set", DONOR_CHECKER_PLUGINS, DERIVED_CHECKER_PLUGINS),
+    Rule("controller_server.ros__parameters.general_goal_checker.stateful",
+         "insert", "true", STATION_CHECKER_BLOCK),
+    Rule("controller_server.ros__parameters.FollowPathRPP.cancel_deceleration",
+         "insert", "0.35", RPP_STATION_BOX_BLOCK),
     Rule("bt_navigator.ros__parameters.global_frame", "same", "map"),
     Rule("bt_navigator.ros__parameters.robot_base_frame",
          "frame", "base_link"),
@@ -466,16 +743,19 @@ class Source(object):
     a decision nothing checks is a decision that expires quietly.
     """
 
-    __slots__ = ("src", "name", "rules", "wrap", "sdf_frames", "kept")
+    __slots__ = ("src", "name", "rules", "wrap", "sdf_frames", "kept",
+                 "goal_checker")
 
     def __init__(self, src, name, rules=(), wrap=False, sdf_frames=False,
-                 kept=()):
+                 kept=(), goal_checker=None):
         self.src = src
         self.name = name
         self.rules = list(rules)
         self.wrap = wrap
         self.sdf_frames = sdf_frames
         self.kept = list(kept)
+        # A behaviour tree: which goal checker its FollowPath names.
+        self.goal_checker = goal_checker
 
 
 SOURCES = [
@@ -498,10 +778,19 @@ SOURCES = [
     # wakes (SPEC_NAMESPACING.md 9.2) - counted, not moved.
     Source("m5_ver3/gazebo/forklift_ver3/model.sdf", "model.sdf",
            sdf_frames=True, kept=(("pallet_s5_kept", ("pallet_s5",)),)),
+    # THE THREE TREES. Two are the donor's, each gaining the general
+    # checker by name; the third IS the rpp donor with the station
+    # checker instead, and it is the only file here derived twice from
+    # one source. Its whole difference from the second is that one
+    # attribute - the residue pin inverts both back to the same bytes.
     Source("m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3.xml",
-           "navigate_to_pose_tricycle_v3.xml"),
+           "navigate_to_pose_tricycle_v3.xml",
+           goal_checker=GENERAL_CHECKER),
     Source("m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3_rpp.xml",
-           "navigate_to_pose_tricycle_v3_rpp.xml"),
+           "navigate_to_pose_tricycle_v3_rpp.xml",
+           goal_checker=GENERAL_CHECKER),
+    Source("m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3_rpp.xml",
+           STATION_TREE, goal_checker=STATION_CHECKER),
 ]
 
 _BY_NAME = dict((source.name, source) for source in SOURCES)
@@ -694,12 +983,16 @@ def derive_text(src, vid, body=None, spawn=None):
     if src.sdf_frames:
         out, more = sdf_frames(out, vid, src.name)
         counts.update(more)
+    if src.goal_checker:
+        out, more = bt_goal_checker(out, src.goal_checker, src.name)
+        counts.update(more)
     rewritten = asserted = 0
     index_of = key_lines(out) if src.rules else {}
     for rule in src.rules:
         index = locate(index_of, rule.dotted, src.name)
         expect = rule.donor.replace(GZ_PREFIX, "/{}/gz/".format(vid))
         expect = expect.replace(M5V3_PREFIX, "/{}/".format(vid))
+        expect = expect.replace("{vid}", vid)
         if rule.rewrites:
             out = set_value(out, index, rule.dotted, src.name, expect,
                             rule.new_value(vid, spawn))
@@ -713,9 +1006,28 @@ def derive_text(src, vid, body=None, spawn=None):
                        .format(rule.dotted, src.name, got, expect),
                        "Leaving a key alone is a claim about it, so the",
                        "claim is checked and not assumed.")
-            asserted += 1
+            # An insertion asserts its anchor too - that is the line
+            # above - but it is counted as what it is.
+            asserted += 0 if rule.inserts else 1
     counts["keyed_rewritten"] = rewritten
     counts["keyed_asserted"] = asserted
+    # THE INSERTION PASS, AND IT IS A PASS OF ITS OWN BECAUSE EVERY
+    # RULE ABOVE REPLACED A LINE IN PLACE against ONE line index. An
+    # insertion moves every line under it, so the index is rebuilt here
+    # and the blocks go in from the BOTTOM UP - two insertions into one
+    # file must not renumber each other's anchor.
+    inserts = [rule for rule in src.rules if rule.inserts]
+    added = 0
+    if inserts:
+        index_of = key_lines(out)
+        for index, rule in sorted(
+                [(locate(index_of, rule.dotted, src.name), rule)
+                 for rule in inserts], key=lambda pair: pair[0], reverse=True):
+            out = insert_after(out, index, rule.new_lines(vid), rule.dotted,
+                               src.name)
+            added += len(rule.target)
+    counts["keyed_inserted"] = len(inserts)
+    counts["inserted_lines"] = added
     for key, literals in src.kept:
         before = sum(body.count(literal) for literal in literals)
         after = sum(out.count(literal) for literal in literals)
@@ -735,6 +1047,14 @@ def invert_text(src, body, vid, origins):
     """This truck's bytes -> donor bytes. The residue pin's other half."""
     spawn = _spawn_of(vid)
     out = unwrap(body, vid, src.name) if src.wrap else body
+    # THE INSERTIONS COME OUT FIRST, before any line index is taken:
+    # they are the only edits that moved a line number.
+    for rule in src.rules:
+        if rule.inserts:
+            out = remove_block(out, rule.new_lines(vid), rule.dotted,
+                               src.name)
+    if src.goal_checker:
+        out = unbt_goal_checker(out, src.goal_checker, src.name)
     index_of = key_lines(out) if src.rules else {}
     for rule in reversed(src.rules):
         if not rule.rewrites:
@@ -870,6 +1190,8 @@ def main():
         moved = sum(entry["counts"]["forklift_gz"]
                     + entry["counts"]["m5v3"]
                     + entry["counts"]["keyed_rewritten"]
+                    + entry["counts"]["keyed_inserted"]
+                    + entry["counts"].get("bt_goal_checker", 0)
                     for entry in manifest["sources"].values())
         print("{}: {} <- {} files, {} literals, spawn {} {} yaw {}"
               .format(TOOL, os.path.join("m6_ver2", "vehicles", vid),

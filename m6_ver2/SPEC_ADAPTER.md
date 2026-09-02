@@ -369,3 +369,23 @@ allowed to change is `test_m6.py` where it pins the bringup child list
    ledger's grants (legs keep it near; the bound should be measured).
 6. Leftovers: rename the `gz_odom` config key; retire the four dead nav
    modules and their tests; dock-axis final leg (out of scope).
+
+---
+
+## AMENDMENTS (G1 wave-B5 gate pass, 2026-09-02)
+
+1. **`topics.gz_odom_truth` was never created.** The m5v3-family derived
+   config already carries `topics.odom_ground_truth` (read by nothing in
+   the fleet path); the world launch bridges the truth from there. A
+   second key would be a second spelling of one wire. The firewall's
+   re-point lands on the **m6-side** derived
+   `m6/vehicles/<vid>/config.yaml` `topics.gz_odom` — the file
+   `contract(vid)["config_path"]` actually names — via
+   `m6_ver2/tools/fleet_odom_firewall.py` (counted, noted, undoable).
+   Decision 4's original wording is stale on both points.
+2. **Every derived tree names its goal checker.** nav2 1.3.12's
+   `findGoalCheckerId` (read from the installed binary) falls back on an
+   empty id ONLY when exactly one checker is loaded; with
+   `station_goal_checker` added, an unnamed FollowPath aborts. Transit
+   trees name `general_goal_checker` (0.60), the station tree names
+   `station_goal_checker` (0.25, stateful).

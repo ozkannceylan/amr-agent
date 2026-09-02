@@ -232,7 +232,7 @@ def test_the_sweep_never_matches_its_own_family_of_scripts(source):
     "the derivation on disk is the one the tool writes",
     "python3 m6_ver2/tools/instantiate_truck.py --all",
     "every named truck is in the VEHICLES table",
-    "m6's derived vehicle config exists",
+    "the fleet's odom key reads the adapter's estimate",
     "the per-truck runner exists",
     "the vendored MQTT broker is installed",
     "is free for the broker",
@@ -263,6 +263,35 @@ def test_the_renderer_gate_refuses_and_reads_its_numbers_from_the_config(
 def test_the_derivation_freshness_gate_runs_the_tools_own_check(source):
     assert 'python3 "$DERIVE" --vid "$vid" --check' in source
     assert 'DERIVE="$M6V2/tools/instantiate_truck.py"' in source
+
+
+def test_the_fleet_config_is_derived_and_firewalled_in_one_step(source):
+    """SPEC_ADAPTER.md Decision 4, wired into preflight.
+
+    THE TWO HALVES ARE ONE COMMAND ON PURPOSE. m6's own tool writes
+    m6/vehicles/<vid>/config.yaml with topics.gz_odom naming the
+    SIMULATOR'S GROUND TRUTH, and vda_agent.py subscribes that key to
+    count route progress. A preflight that made the file and left the
+    override to an operator would come up looking exactly like a
+    correct one - so the tool that makes it is the tool that firewalls
+    it, and start() runs that one.
+    """
+    assert 'FIREWALL="$M6V2/tools/fleet_odom_firewall.py"' in source
+    assert 'python3 "$FIREWALL" --vid "$vid"' in source
+    # and the OLD shape is gone: existence alone is not the gate any
+    # more, because a file that exists can be the unfirewalled one.
+    assert 'instantiate_vehicle.py --all )' not in source
+
+
+def test_the_firewall_tool_exists_and_names_the_key_the_fleet_reads():
+    import sys
+    tools = os.path.join(_M6V2, "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import fleet_odom_firewall as firewall
+    assert firewall.ODOM_KEY == "topics.gz_odom"
+    assert firewall.est_odom_topic("f1") == "/f1/est/odom"
+    assert firewall.truth_odom_topic("f1") == "/f1/gz/odom"
 
 
 def test_a_plain_m6_cell_is_detected_by_environment_and_not_by_name(source):

@@ -82,8 +82,25 @@ TRANSIT = "transit"
 #: PATHS are not here: they live in the per-truck
 #: m6_ver2/vehicles/fN/config.yaml nav block, because the path is a
 #: deployment fact and the mapping is a control fact.
+#:
+#: THREE TREES AND TWO CONTROLLERS, WHICH IS NOT A CONTRADICTION. The
+#: tree carries TWO decisions to bt_navigator, not one: which controller
+#: its ControllerSelector defaults to, and - since M6V2-G1-B5 - which
+#: goal checker its FollowPath names. The station spur and the spur exit
+#: are both RPP legs and they finish differently: the spur runs into a
+#: BAY and is the only leg allowed to complete, so it names the 0.25 m
+#: `station_goal_checker`; the spur exit is a leg out of a bay that gets
+#: preempted 1.5 m from its end like any other transit, so it keeps the
+#: 0.60 m one. A third tree is what says that, because a goal checker is
+#: an attribute of a behaviour tree and there is no other door.
+#:   AND EVERY ROW NAMES ONE. Two goal checkers are declared in the
+#: derived nav2.yaml, and nav2_controller only falls back to "the only
+#: plugin loaded" when there IS only one - see
+#: m6_ver2/tools/instantiate_truck.py STATION_CHECKER, which read that
+#: branch out of the installed binary. A tree that named no checker
+#: would abort every FollowPath on this stack.
 CLASS_TREE = collections.OrderedDict((
-    (STATION_SPUR, ("rpp", "nav.bt_xml_rpp")),
+    (STATION_SPUR, ("rpp", "nav.bt_xml_station")),
     (SPUR_EXIT, ("rpp", "nav.bt_xml_rpp")),
     (TRANSIT, ("mppi", "nav.bt_xml")),
 ))
@@ -159,10 +176,16 @@ def spur_feet():
     return dict(_SPUR_FEET)
 
 
-def station_at(xy, radius_m=ON_STATION_M):
-    """The station whose point `xy` stands on, or None."""
+def station_at(xy, radius_m=ON_STATION_M, stations=STATIONS):
+    """The station whose point `xy` stands on, or None.
+
+    `stations` is an argument so that leg_yaw() below can ask WHICH
+    station and then ask that same table for its heading. A lookup that
+    took the id from one table and the yaw from another would be two
+    opinions about the floor the day a bay moves.
+    """
     x, y = float(xy[0]), float(xy[1])
-    for station_id, station in STATIONS.items():
+    for station_id, station in stations.items():
         if math.dist((x, y), (station["x"], station["y"])) <= radius_m:
             return station_id
     return None
@@ -291,6 +314,46 @@ def plan_legs(polyline):
     return legs
 
 
+def leg_yaw(leg, stations=STATIONS):
+    """The heading the goal at this leg's end is approached on.
+
+    A `Leg` carries its points and no heading, and SmacPlannerHybrid is
+    HEADING-AWARE: the goal's orientation shapes the whole plan, so a
+    goal sent without one is a goal sent with yaw 0 - which on this
+    floor is a quarter turn out of every aisle.
+
+    TWO ANSWERS, AND WHICH ONE APPLIES IS THE SAME QUESTION classify()
+    ALREADY ASKED. A leg that ends ON a station ends at the BAY's own
+    approach heading, because that is the heading the truck has to
+    arrive on and the bay is not free to choose it. Every other leg ends
+    pointing along ITSELF, down the last segment it drove.
+
+    THE LAST SEGMENT AND NOT THE WHOLE LEG. A leg is near-collinear by
+    construction (COLLINEAR_RAD), so the two are the same to within 15
+    degrees - but only the last segment is the one the goal sits on, and
+    a leg whose last segment has no length has no heading at all rather
+    than a heading of zero. That case is refused: `_clean` drops
+    zero-length segments before any leg is made, so a leg that has one
+    was not built by split_legs and the atan2 would be an invention.
+    """
+    station = station_at(leg.end, stations=stations)
+    if station is not None:
+        try:
+            return float(stations[station]["yaw"])
+        except (KeyError, TypeError, ValueError):
+            raise Nav2LegsError(
+                "station {} declares no usable approach heading, and a "
+                "bay's heading is the one thing a spur leg cannot work "
+                "out for itself".format(station))
+    tail = leg.points[-2] if len(leg.points) > 1 else leg.start
+    if math.dist(tuple(tail), tuple(leg.end)) == 0.0:
+        raise Nav2LegsError(
+            "the leg ending at {!r} has no last segment, so it has no "
+            "heading: split_legs drops zero-length segments, and a leg "
+            "carrying one did not come from it".format(leg.end))
+    return math.atan2(leg.end[1] - tail[1], leg.end[0] - tail[0])
+
+
 def should_preempt(distance_to_end_m, final):
     """Is it time to send the next leg?
 
@@ -347,6 +410,15 @@ def _selftest():
           len(legs[0].points) == 8)
     check("the spur is driven by rpp and the transit by mppi",
           legs[1].controller == "rpp" and legs[0].controller == "mppi")
+    check("the spur runs the STATION tree and the transit the default",
+          legs[1].tree_key == "nav.bt_xml_station"
+          and legs[0].tree_key == "nav.bt_xml")
+    check("the spur ends on S5's own approach heading",
+          abs(leg_yaw(legs[1]) - float(STATIONS["S5"]["yaw"])) < 1e-12)
+    check("a transit leg ends pointing along its last segment",
+          abs(leg_yaw(legs[0])
+              - math.atan2(legs[0].end[1] - legs[0].points[-2][1],
+                           legs[0].end[0] - legs[0].points[-2][0])) < 1e-12)
 
     out = plan_legs(route.plan_route((7.0, 4.25), "S9"))
     check("leaving a station is a dead-astern SPUR EXIT",
@@ -366,6 +438,14 @@ def _selftest():
     check("the final leg is never preempted",
           not should_preempt(0.01, final=True))
 
+    check("only the station spur names the station tree",
+          [name for name, (_c, key) in CLASS_TREE.items()
+           if key == "nav.bt_xml_station"] == [STATION_SPUR])
+    check("every leg class names a tree key and no two classes share a "
+          "controller they do not share a tree with",
+          all(key.startswith("nav.bt_xml")
+              for _c, key in CLASS_TREE.values()))
+
     for bad, what in ((lambda: controller_for("freespace"),
                        "an unknown leg class"),
                       (lambda: plan_legs([(0.0, 0.0)]),
@@ -373,7 +453,14 @@ def _selftest():
                       (lambda: plan_legs([(1.0, 1.0), (1.0, 1.0)]),
                        "a polyline with no length"),
                       (lambda: should_preempt(float("nan"), final=False),
-                       "a non-finite distance")):
+                       "a non-finite distance"),
+                      (lambda: leg_yaw(Leg(points=[(0.0, 0.0), (0.0, 0.0)],
+                                           start=(0.0, 0.0),
+                                           end=(0.0, 0.0), klass=TRANSIT,
+                                           controller="mppi",
+                                           tree_key="nav.bt_xml",
+                                           final=True)),
+                       "a leg with no last segment")):
         try:
             bad()
             check("{} is refused by name".format(what), False)

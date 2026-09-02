@@ -495,8 +495,11 @@ def test_the_next_leg_is_sent_at_the_preempt_distance(driving):
     driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
     driving.tick()
     assert len(driving.action.goals) == 2
+    # THE STATION TREE, because leg 2 of spawn -> S5 is the spur into
+    # the bay: nav2_legs.CLASS_TREE names the key and this shell only
+    # looks it up in the config.
     assert driving.action.goals[1]["behavior_tree"].endswith(
-        os.path.basename(driving.cfg.s("nav.bt_xml_rpp")))
+        os.path.basename(driving.cfg.s("nav.bt_xml_station")))
 
 
 def test_a_preempted_legs_abort_is_not_a_failure(driving):

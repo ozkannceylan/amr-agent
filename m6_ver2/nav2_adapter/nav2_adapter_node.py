@@ -97,7 +97,7 @@ REQUIRED_KEYS = (
     "navcmd.steer_command_limit_rad", "navcmd.speed_max_mps",
     "navcmd.creep_speed_mps", "navcmd.zero_speed_mps",
     "navcmd.yawrate_refusal_radps", "navcmd.command_timeout_s",
-    "nav.bt_xml", "nav.bt_xml_rpp",
+    "nav.bt_xml", "nav.bt_xml_rpp", "nav.bt_xml_station",
     "nav.watchdog.required_closing_m", "nav.watchdog.closing_allowance_s",
 )
 
@@ -286,11 +286,15 @@ class Adapter(object):
         self.frame = nav2_pose.load_frame(os.path.join(
             _donors.REPO, cfg.s("map.dir"), cfg.s("map.name"),
             cfg.s("map.registration.file")))
-        self.trees = {
-            "nav.bt_xml": os.path.join(_donors.REPO, cfg.s("nav.bt_xml")),
-            "nav.bt_xml_rpp": os.path.join(_donors.REPO,
-                                           cfg.s("nav.bt_xml_rpp")),
-        }
+        # THE THREE TREES, KEYED BY THE NAME nav2_legs.CLASS_TREE USES.
+        # The dict is built from that table rather than typed out, so a
+        # leg class that names a fourth tree is a KeyError on the config
+        # key at BOOT - refused by its dotted name by load_config - and
+        # not a goal forty metres into a drive carrying a path
+        # bt_navigator cannot open.
+        self.trees = dict(
+            (key, os.path.join(_donors.REPO, cfg.s(key)))
+            for _controller, key in nav2_legs.CLASS_TREE.values())
         self.command_timeout_s = cfg.f("navcmd.command_timeout_s")
         self.required_closing_m = cfg.f("nav.watchdog.required_closing_m")
         self.closing_allowance_s = cfg.f("nav.watchdog.closing_allowance_s")
@@ -533,30 +537,11 @@ class Adapter(object):
             frame_id=self.map_frame,
             stamp=self.node.get_clock().now().to_msg(),
             map_pose=self.frame.to_map(leg.end[0], leg.end[1],
-                                       self._leg_yaw(leg)),
+                                       nav2_legs.leg_yaw(leg)),
             behavior_tree=self.trees[leg.tree_key])
         future = self.action.send_goal_async(goal)
         future.add_done_callback(
             lambda done, gen=generation: self._on_accepted(done, gen))
-
-    def _leg_yaw(self, leg):
-        """The heading the goal is approached on.
-
-        NAMED LEFTOVER, AND IT IS ARITHMETIC THAT BELONGS IN nav2_legs.
-        A `Leg` carries its points but no heading, and SmacPlannerHybrid
-        is heading-aware: the goal's orientation shapes the whole plan.
-        A station spur ends at the bay's own approach heading
-        (stations.STATIONS carries it, and it is what the truck has to
-        arrive on); every other leg ends pointing along itself. When
-        A-T6 grows `nav2_legs.leg_yaw(leg)` this function becomes a
-        call to it and this comment goes with it.
-        """
-        station = nav2_legs.station_at(leg.end)
-        if station is not None:
-            from stations import STATIONS
-            return float(STATIONS[station]["yaw"])
-        tail = leg.points[-2] if len(leg.points) > 1 else leg.start
-        return math.atan2(leg.end[1] - tail[1], leg.end[0] - tail[0])
 
     def _on_accepted(self, done, generation):
         handle = done.result()

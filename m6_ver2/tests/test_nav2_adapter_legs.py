@@ -146,10 +146,21 @@ def test_the_table_names_only_controllers_nav2_yaml_declares():
     # PRODUCER PIN. drive_goal.CONTROLLER_TREE is the m5v3 table this
     # one generalises; a third controller name here would be a name
     # bt_navigator cannot open forty metres into a drive.
+    #   AND THE TREE KEY IS THE DONOR'S EXCEPT ON ONE ROW. m5v3 had one
+    # tree per CONTROLLER because it had one goal checker; this branch
+    # has one tree per LEG CLASS because the station spur finishes on a
+    # 0.25 m box and the spur exit does not. So the station spur's key
+    # is the RPP tree's, with the checker changed, and every other row
+    # is still exactly drive_goal's answer.
     import drive_goal
     for klass, (controller, tree_key) in nav2_legs.CLASS_TREE.items():
         assert controller in drive_goal.CONTROLLER_TREE, klass
-        assert drive_goal.CONTROLLER_TREE[controller] == tree_key
+        donor_key = drive_goal.CONTROLLER_TREE[controller]
+        if klass == nav2_legs.STATION_SPUR:
+            assert tree_key == "nav.bt_xml_station"
+            assert donor_key == "nav.bt_xml_rpp"
+        else:
+            assert tree_key == donor_key, klass
 
 
 def test_the_spur_classes_run_rpp_and_transit_runs_mppi():
@@ -169,7 +180,84 @@ def test_every_leg_carries_its_controller_and_its_tree_key():
     legs = nav2_legs.plan_legs(_plan(F1_SPAWN, "S5"))
     assert legs[0].controller == "mppi" and legs[0].tree_key == "nav.bt_xml"
     assert legs[1].controller == "rpp"
-    assert legs[1].tree_key == "nav.bt_xml_rpp"
+    assert legs[1].tree_key == "nav.bt_xml_station"
+
+
+def test_only_the_station_spur_runs_the_station_tree():
+    """THE 0.25 m BOX IS FOR THE LEG THAT ENDS IN A BAY AND NO OTHER.
+
+    The spur EXIT is RPP too - a station is left dead-astern - but it is
+    preempted 1.5 m from its end like any transit leg, so it never
+    reaches a goal checker at all and a tighter box on it would only
+    narrow the tube its plan is built in.
+    """
+    assert nav2_legs.controller_for(nav2_legs.STATION_SPUR) == (
+        "rpp", "nav.bt_xml_station")
+    assert nav2_legs.controller_for(nav2_legs.SPUR_EXIT) == (
+        "rpp", "nav.bt_xml_rpp")
+    assert nav2_legs.controller_for(nav2_legs.TRANSIT) == (
+        "mppi", "nav.bt_xml")
+    keys = [key for _c, key in nav2_legs.CLASS_TREE.values()]
+    assert keys.count("nav.bt_xml_station") == 1
+
+
+# ----------------------------------------------------------------------
+# leg_yaw - the heading the goal at a leg's end is approached on
+# ----------------------------------------------------------------------
+
+def test_a_station_leg_ends_on_the_bays_own_heading():
+    """A bay does not get to choose - the truck arrives forks-first on
+    the heading stations.STATIONS declares, and SmacPlannerHybrid plans
+    the whole approach around it."""
+    legs = nav2_legs.plan_legs(_plan(F1_SPAWN, "S5"))
+    assert legs[-1].klass == nav2_legs.STATION_SPUR
+    assert nav2_legs.leg_yaw(legs[-1]) == float(STATIONS["S5"]["yaw"])
+
+
+def test_a_transit_leg_ends_pointing_along_its_last_segment():
+    legs = nav2_legs.plan_legs(_plan(F1_SPAWN, "S5"))
+    leg = legs[0]
+    want = math.atan2(leg.end[1] - leg.points[-2][1],
+                      leg.end[0] - leg.points[-2][0])
+    assert nav2_legs.leg_yaw(leg) == want
+
+
+def test_leg_yaw_reads_one_station_table_and_not_two():
+    """The id and the heading come out of the SAME table.
+
+    station_at() takes the table as an argument for exactly this: a
+    lookup that found the station in one dict and its yaw in another
+    would answer confidently after a bay moved in only one of them.
+    """
+    moved = {"S5": {"x": 100.0, "y": 100.0, "yaw": 0.5, "arrive_m": 0.25}}
+    leg = nav2_legs.Leg(points=[(99.0, 100.0), (100.0, 100.0)],
+                        start=(99.0, 100.0), end=(100.0, 100.0),
+                        klass=nav2_legs.STATION_SPUR, controller="rpp",
+                        tree_key="nav.bt_xml_station", final=True)
+    assert nav2_legs.leg_yaw(leg, stations=moved) == 0.5
+    # the real table has no station out there, so the same leg reads its
+    # own last segment instead
+    assert nav2_legs.leg_yaw(leg) == 0.0
+
+
+def test_a_leg_with_no_last_segment_is_refused_by_name():
+    leg = nav2_legs.Leg(points=[(1.0, 1.0), (1.0, 1.0)], start=(1.0, 1.0),
+                        end=(1.0, 1.0), klass=nav2_legs.TRANSIT,
+                        controller="mppi", tree_key="nav.bt_xml", final=True)
+    with pytest.raises(nav2_legs.Nav2LegsError) as caught:
+        nav2_legs.leg_yaw(leg)
+    assert "no last segment" in str(caught.value)
+
+
+def test_a_station_without_a_heading_is_refused_by_name():
+    broken = {"S5": {"x": 0.0, "y": 0.0, "arrive_m": 0.25}}
+    leg = nav2_legs.Leg(points=[(-1.0, 0.0), (0.0, 0.0)], start=(-1.0, 0.0),
+                        end=(0.0, 0.0), klass=nav2_legs.STATION_SPUR,
+                        controller="rpp", tree_key="nav.bt_xml_station",
+                        final=True)
+    with pytest.raises(nav2_legs.Nav2LegsError) as caught:
+        nav2_legs.leg_yaw(leg, stations=broken)
+    assert "approach heading" in str(caught.value)
 
 
 # ----------------------------------------------------------------------

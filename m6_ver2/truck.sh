@@ -137,7 +137,8 @@ REQUIRED_KEYS=(
     localization.amcl.params_file localization.amcl.package
     localization.amcl.executable localization.amcl.node_name
     localization.lifecycle_timeout_s
-    nav.params_file nav.bt_xml nav.bt_xml_rpp nav.costmap_sections
+    nav.params_file nav.bt_xml nav.bt_xml_rpp nav.bt_xml_station
+    nav.costmap_sections
     nav.planner.package nav.planner.executable nav.planner.node_name
     nav.controller.package nav.controller.executable
     nav.controller.node_name
@@ -172,6 +173,15 @@ configure() {
     # and BackUp in it.
     NAV_BT="$M6V2_REPO/$CFG_NAV_BT_XML"
     NAV_BT_RPP="$M6V2_REPO/$CFG_NAV_BT_XML_RPP"
+    # THE THIRD TREE, AND THIS SCRIPT NEVER PASSES IT ANYWHERE. It is
+    # the RPP tree with its FollowPath naming the 0.25 m
+    # `station_goal_checker` instead of the 0.60 m one, and it is
+    # reached ONLY through the `behavior_tree` field of a
+    # NavigateToPose goal - which the adapter fills from
+    # nav2_legs.CLASS_TREE. It is checked for HERE because a missing
+    # tree is a goal bt_navigator cannot open forty metres into a
+    # drive, reported to the operator as a nav fault.
+    NAV_BT_STATION="$M6V2_REPO/$CFG_NAV_BT_XML_STATION"
     # THE SIX SECTIONS nav2.yaml HAS TO BE ADDRESSED TO. Four are the
     # servers this script starts; two are the costmap SUB-NODES those
     # servers construct, which have no process, are never named by
@@ -475,15 +485,14 @@ autostart_active() {  # autostart_active <node> <budget> <log> <params> <line>..
 # have no process at all - so five ALIVE processes and a `status` that
 # says so is satisfied by a nav arm whose global costmap never
 # transitioned.
-#   NAMED GAP, AND IT IS NAMED RATHER THAN QUIETLY ABSENT.
-#   m5_ver3/tools/nav_health.py goes one step further and computes ONE
-#   trivial path, which is the only check that catches a global costmap
-#   whose static layer never received the frozen grid (wall-to-wall
-#   NO_INFORMATION; with allow_unknown:false the planner then refuses
-#   every goal, once, into its own log). That tool reads
-#   m5_ver3/config.yaml and AMR-DEC-006 freezes it, so it cannot be
-#   pointed at this truck's action names - the m6v2 equivalent is a
-#   tool of its own and is NOT in this gate yet.
+#   AND IT IS STILL NOT THE WHOLE QUESTION. Six ACTIVE nodes and an
+#   advertised action say nothing about whether the planner has a
+#   COSTMAP to plan in: a global costmap whose static layer never
+#   received the frozen grid is wall-to-wall NO_INFORMATION, and with
+#   allow_unknown:false it refuses every goal, once, into its own log.
+#   nav_can_plan() below asks that, and it asks it AFTER this - an
+#   action that is not advertised yet would make a plan gate time out
+#   over a stack that was merely slow.
 nav_can_answer() {
     local node deadline action="/$VID/navigate_to_pose"
     for node in $NAV_LIFECYCLE_NODES; do
@@ -520,6 +529,28 @@ nav_can_answer() {
         sleep 2
     done
     echo "  $action answering, six lifecycle nodes active"
+}
+
+# ---- AND CAN IT PLAN, OR IS IT MERELY ANSWERING? ----
+#
+# ONE TRIVIAL PATH, 2.00 m ahead of the seed. It is the only check that
+# can see an ACTIVE nav arm with an EMPTY costmap, and on this branch
+# the map is SHARED - one un-namespaced map_server, latched ONCE for
+# four late-joining AMCLs and four static layers - so the failure can
+# take one truck or all four and looks identical either way.
+#   IT COMMANDS NO MOTION. compute_path_to_pose is the PLANNER's action
+# and never reaches the controller, so nothing is published on this
+# truck's command path and the vehicle does not move.
+nav_can_plan() {
+    if ! python3 "$M6V2/tools/nav_plan_health.py" --vid "$VID" \
+            "${NS[@]}" -r __node:=nav_plan_health; then
+        refuse "this truck's planner returns a PATH and not just a status" \
+            "$M6V2/tools/nav_plan_health.py (its refusal is printed above)" \
+            "every lifecycle node is ACTIVE, the navigate action is on" \
+            "the graph, and the planner cannot produce two poses over" \
+            "two metres of open aisle." \
+            "THE STACK IS INCOMPLETE, and what is left of it is STILL UP."
+    fi
 }
 
 # ---------------------------- THE SPAWNER ----------------------------
@@ -604,7 +635,8 @@ start() {
     # ---- WHAT IS ON DISK, BEFORE ANYTHING IS ON THE GRAPH ----
     local file
     for file in "$EKF_PARAMS" "$SMOOTHER_PARAMS" "$LOC_PARAMS" \
-                "$NAV_PARAMS" "$NAV_BT" "$NAV_BT_RPP"; do
+                "$NAV_PARAMS" "$NAV_BT" "$NAV_BT_RPP" \
+                "$NAV_BT_STATION"; do
         [ -f "$file" ] || refuse "this truck's derived artifacts exist" \
             "m6_ver2/tools/instantiate_truck.py (SPEC_NAMESPACING.md 3)" \
             "$file is not there. The per-vid tree is a gitignored BUILD" \
@@ -936,6 +968,7 @@ sys.exit(wheel_odometry.main())
     sleep "$CFG_TIMING_STARTUP_CHECK_S"
     assert_children_alive
     nav_can_answer
+    nav_can_plan
 
     # ---- AND THE ADAPTER, WHICH IS WHAT m6 TALKS TO ----
     # It replaces m6/ipc/nav_node.py as the motion engine and presents

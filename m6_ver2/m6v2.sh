@@ -58,6 +58,8 @@ LOGDIR="$M6V2/logs"
 TRUCK="$M6V2/truck.sh"
 WORLD_LAUNCH="$M6V2/world.launch.py"
 DERIVE="$M6V2/tools/instantiate_truck.py"
+# The FLEET side's derivation and its one override. See start().
+FIREWALL="$M6V2/tools/fleet_odom_firewall.py"
 ROS_SETUP="/opt/ros/jazzy/setup.bash"
 # The broker is vendored into the user's home rather than installed -
 # this WSL has no usable sudo - and BROKER_LIB is not optional: those
@@ -409,15 +411,26 @@ start() {
             "  python3 m6_ver2/tools/instantiate_truck.py --all"; return 1; }
         # m6's derived pair is this cell's too: sto_contactor.py and
         # forklift_io.py read m6's spelling of the terminals and the
-        # m5v3 schema does not carry it. Its own tool owns its freshness;
-        # this only asks that it has been made.
-        [ -f "$M6/vehicles/$vid/config.yaml" ] || { refuse \
-            "m6's derived vehicle config exists" \
-            "m6/tools/instantiate_vehicle.py" \
-            "no $M6/vehicles/$vid/config.yaml" \
-            "The world's sto_contactor and forklift_io read THAT file." \
-            "Make it (it writes only gitignored build products):" \
-            "  ( cd $M6 && python3 tools/instantiate_vehicle.py --all )"
+        # m5v3 schema does not carry it.
+        #   IT IS MADE HERE AND FIREWALLED IN THE SAME BREATH, and the
+        # two are one command because doing the first without the second
+        # is the silent failure. fleet_odom_firewall.py runs m6's OWN
+        # tool (which owns those bytes) and then applies SPEC_ADAPTER.md
+        # Decision 4's single override: topics.gz_odom - the key
+        # vda_agent.py and hmi_node.py subscribe - is pointed at
+        # /<vid>/est/odom, the adapter's estimate, instead of
+        # /<vid>/gz/odom, the simulator's own truth. Unfirewalled, the
+        # fleet counts route progress with an instrument no real truck
+        # has, the world comes up, the trucks drive, and nothing says
+        # so. It writes only gitignored build products.
+        python3 "$FIREWALL" --vid "$vid" || { refuse \
+            "the fleet's odom key reads the adapter's estimate" \
+            "m6_ver2/tools/fleet_odom_firewall.py (SPEC_ADAPTER.md Decision 4)" \
+            "$vid's fleet config could not be derived or firewalled;" \
+            "the tool's own reply is above." \
+            "The world's sto_contactor and forklift_io read that file," \
+            "and so does the VDA agent that counts arrivals." \
+            "NOTHING WAS STARTED."
             return 1; }
     done
     check_isolation || return 1
