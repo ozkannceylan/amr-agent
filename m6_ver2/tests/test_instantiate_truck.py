@@ -58,7 +58,15 @@ EXPECTED = {
     },
     "nav2.yaml": {
         "forklift_gz": 2, "m5v3": 2, "agv_forklift_kept": 3,
-        "keyed_rewritten": 6, "keyed_asserted": 4,
+        # THE ONLY ROW WHERE gz_survivors IS NOT forklift_gz, and the
+        # difference is the masked scan (M6V2-G1-B4). The blanket
+        # rewrite carries both obstacle layers' `topic:` onto this
+        # truck's gz namespace and a keyed rule then moves them OFF it,
+        # onto scan_mask_node's output - so the two literals the blanket
+        # counted are gone from the finished file. See
+        # instantiate_truck.MASKED_SCAN_TEMPLATE.
+        "gz_survivors": 0,
+        "keyed_rewritten": 8, "keyed_asserted": 4,
         "lines": 2273, "wrapped": True, "wrap_keys": 7,
     },
     "amcl.yaml": {
@@ -193,7 +201,12 @@ def test_counts_match_the_frozen_table(built):
         for name, want in EXPECTED.items():
             got = counts[name]["counts"]
             for key, value in want.items():
-                if key in ("lines", "wrapped", "wrap_keys"):
+                # gz_survivors is a fact about the FINISHED file, not
+                # about the pipeline's counters, so the manifest does
+                # not carry it - test_the_crib_paths_are_not_rewritten
+                # is where it is checked.
+                if key in ("lines", "wrapped", "wrap_keys",
+                           "gz_survivors"):
                     continue
                 assert got.get(key) == value, (vid, name, key, got)
 
@@ -417,6 +430,49 @@ def test_every_derived_artifact_path_points_at_this_vids_copy(built):
                                                os.path.basename(path))), path
 
 
+def test_both_costmaps_read_the_masked_scan(built):
+    """M6V2-G1-B4's rule, and the reason it is a DERIVATION and not a flag.
+
+    nav2's costmaps are SUB-NODES with no command line, so the topic
+    their obstacle layer marks and clears from is a FILE literal and
+    this tool is the only thing that can change it. What it has to be
+    changed to is NOT the bridge's raw scan: the vehicle's own mast
+    stands in the nav lidar's beam at 1.29-1.48 m (follower.SELF_MASK),
+    and a layer that marks those returns puts lethal cells ON THE ROBOT
+    - 205 START_OCCUPIED, on every plan, for ever, with nothing in any
+    log naming the truck as the obstacle.
+
+    ONE SPELLING, and everything else asks this module for it:
+    m6_ver2/truck.sh passes it to scan_mask_node and to AMCL and then
+    checks this file against the answer.
+    """
+    donor = itk.read_text(os.path.join(itk.REPO, "m5_ver3", "nav2.yaml"))
+    assert donor.count("topic: /forklift/gz/scan_nav") == 2
+    root, _ = built
+    for vid in VIDS:
+        masked = itk.masked_scan_topic(vid)
+        assert masked == "/{}/scan_nav_masked".format(vid)
+        body = _derived(root, vid, itk.source("nav2.yaml"))
+        assert body.count("topic: " + masked) == 2
+        # AND THE RAW SCAN IS GONE FROM THAT FILE. A costmap left on it
+        # is the failure this rule exists to prevent, and it is not
+        # visible from anywhere else.
+        raw = _cfg(root, vid)["topics"]["scan_nav"]
+        assert raw == "/{}/gz/scan_nav".format(vid)
+        assert raw not in body
+        # AMCL is pointed at the masked scan on its COMMAND LINE (it is
+        # not a sub-node), so amcl.yaml holds no scan topic at all -
+        # asserted, because a second copy there would be one nobody
+        # checks.
+        assert "scan_topic:" not in _derived(root, vid,
+                                             itk.source("amcl.yaml"))
+
+
+def test_the_masked_scan_name_refuses_a_stranger():
+    with pytest.raises(SystemExit):
+        itk.masked_scan_topic("forklift")
+
+
 def test_the_crib_paths_are_not_rewritten(built):
     """agv/forklift/... is a repo path, not this truck's namespace."""
     root, _ = built
@@ -427,8 +483,13 @@ def test_the_crib_paths_are_not_rewritten(built):
                     == want["agv_forklift_kept"]), name
             assert body.count("/forklift/gz/") == 0, name
             assert body.count("/m5v3/") == 0, name
+            # gz_survivors, and it is `forklift_gz` on every row but
+            # one: the blanket rewrite's count is what it MOVED, and a
+            # keyed rule that runs after it may move a literal off the
+            # gz namespace again. nav2.yaml's masked scan is that case
+            # and it is spelled out in the table above.
             assert (body.count("/{}/gz/".format(vid))
-                    == want["forklift_gz"]), name
+                    == want.get("gz_survivors", want["forklift_gz"])), name
 
 
 def test_check_refuses_a_stale_derivation(tmp_path, capsys):

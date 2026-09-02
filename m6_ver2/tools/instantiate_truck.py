@@ -117,6 +117,38 @@ SDF_FRAME_NAMES = [
     "pallet_cam_optical", "imu_link",
 ]
 
+# THE MASKED SCAN, AND WHY THE COSTMAPS ARE POINTED AT IT HERE RATHER
+# THAN ON A COMMAND LINE (SPEC_ADAPTER.md A-T2, M6V2-G1-B4).
+# nav2's costmaps are SUB-NODES with no command line, so a `-p` cannot
+# reach their observation source: the topic they mark and clear from is
+# a FILE literal, and the only place it can be changed is this
+# derivation. What it has to be changed TO is not the bridge's raw scan.
+# The vehicle's own mast stands in the nav lidar's beam at 1.29-1.48 m
+# (m6/ipc/follower.py SELF_MASK, the ver2-lineage contour), and an
+# obstacle layer marking those returns puts LETHAL CELLS ON THE ROBOT -
+# which is the 205 START_OCCUPIED class, on every plan, for ever.
+# m6_ver2/nav2_adapter/scan_mask_node.py republishes the raw scan with
+# that contour removed and this is the address it publishes on.
+#   ONE SPELLING, AND IT IS THIS ONE. m6_ver2/truck.sh asks this module
+#   for the name (masked_scan_topic) rather than composing a second
+#   copy of it, and then checks the derived nav2.yaml against the answer
+#   with m5v3.sh's own check_address idiom - so the file, the mask node
+#   and AMCL cannot disagree about which scan the localiser and the
+#   costmaps are reading.
+MASKED_SCAN_TEMPLATE = "/{vid}/scan_nav_masked"
+
+
+def masked_scan_topic(vid):
+    """The address scan_mask_node publishes on, for this truck.
+
+    Read by the runner as well as by the rules below: a name that is
+    composed in two places is two names the day one of them changes.
+    """
+    if not VID_RE.match(vid or ""):
+        refuse("the vid is a fleet vehicle id", "{} 3".format(SPEC),
+               "{!r} is not one".format(vid))
+    return MASKED_SCAN_TEMPLATE.format(vid=vid)
+
 
 def refuse(check, owner, *lines):
     """Say no, name the check and the file that owns it, and exit 1.
@@ -392,6 +424,14 @@ NAV2_RULES = [
     # static layers reading it.
     Rule("global_costmap.global_costmap.ros__parameters."
          "static_layer.map_topic", "same", "/map"),
+    # ---- BOTH OBSTACLE LAYERS READ THE MASKED SCAN ----
+    # See MASKED_SCAN_TEMPLATE. The donor value is the bridge's raw
+    # scan, already carried onto this truck by the blanket rewrite; what
+    # these two rules change is WHICH scan, not whose.
+    Rule("local_costmap.local_costmap.ros__parameters.obstacle_layer."
+         "scan.topic", "set", GZ_PREFIX + "scan_nav", MASKED_SCAN_TEMPLATE),
+    Rule("global_costmap.global_costmap.ros__parameters.obstacle_layer."
+         "scan.topic", "set", GZ_PREFIX + "scan_nav", MASKED_SCAN_TEMPLATE),
     Rule("bt_navigator.ros__parameters.global_frame", "same", "map"),
     Rule("bt_navigator.ros__parameters.robot_base_frame",
          "frame", "base_link"),
