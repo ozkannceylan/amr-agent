@@ -389,3 +389,12 @@ allowed to change is `test_m6.py` where it pins the bringup child list
    `station_goal_checker` added, an unnamed FollowPath aborts. Transit
    trees name `general_goal_checker` (0.60), the station tree names
    `station_goal_checker` (0.25, stateful).
+
+3. **Transit goal heading is bidirectional (G1-C3 ruling, 2026-09-02).**
+   `leg_yaw`'s along-the-last-segment rule forced a fork direction on a
+   vehicle that drives both ways; at a spur mouth that demanded an
+   in-aisle turnaround Smac planned as an out-of-corridor manoeuvre and
+   the closing watchdog killed (run-5, six BLOCKEDs, D7). A TRANSIT
+   leg's goal yaw is the travel direction OR its π-flip, whichever is
+   the smaller rotation from the truck's current yaw. STATION legs keep
+   the station heading; SPUR_EXIT keeps the bay heading (D5).

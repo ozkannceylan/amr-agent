@@ -158,3 +158,60 @@ def test_every_legend_name_is_pinned_to_the_file_that_states_it():
 
 def test_the_selftest_is_green():
     assert nav2_watch._selftest() == 0
+
+
+# ----------------------------------------------------------------------
+# D6 - TWO BELIEFS, ONE BOUNDARY, run4 2026-09-02
+#
+# nav2's `station_goal_checker` and the adapter's `arrive_m` are the
+# SAME number, 0.25 m, read off two different beliefs: nav2 checks
+# AMCL's map pose, the adapter checks the composed estimate through the
+# committed registration, and they are sampled at different instants.
+# Three arrivals at S1 in one run measured 0.2453, 0.2482 and 0.2502 m -
+# and the third one, five tenths of a millimetre outside, made nav2's
+# SUCCEEDED an "arrived short" and put the task BLOCKED back on the
+# fleet's queue.
+#
+# THE VERDICT NEEDS A MARGIN AND THE MARGIN IS ALREADY MEASURED: the
+# committed registration states its own residual against the building
+# (MAX 0.1179 m for warehouse_v3), and two beliefs of one truck cannot
+# be asked to agree closer than the transform between their frames is
+# known. The verdict this note exists for - m5v3's S7 orbit, a stable
+# 0.643-0.742 m ring round a station the truck can never reach - is
+# still a mile outside it.
+# ----------------------------------------------------------------------
+
+REGISTRATION_MAX_M = 0.1179
+
+
+def test_two_beliefs_at_the_boundary_are_not_a_miss():
+    for distance in (0.2453, 0.2482, 0.2502, 0.30, 0.3679):
+        assert not nav2_watch.arrival_is_short(
+            distance, 0.25, REGISTRATION_MAX_M), distance
+
+
+def test_the_s7_orbit_is_still_a_miss():
+    for distance in (0.3680, 0.41, 0.643, 0.742):
+        assert nav2_watch.arrival_is_short(
+            distance, 0.25, REGISTRATION_MAX_M), distance
+
+
+def test_a_transform_that_states_no_residual_buys_no_margin():
+    # A registration with no stated residual is not an excuse for one.
+    assert nav2_watch.arrival_is_short(0.2502, 0.25, 0.0)
+    assert not nav2_watch.arrival_is_short(0.2500, 0.25, 0.0)
+
+
+def test_an_unknown_pose_is_always_short():
+    assert nav2_watch.arrival_is_short(float("inf"), 0.25, REGISTRATION_MAX_M)
+
+
+def test_the_margin_is_a_magnitude():
+    assert nav2_watch.arrival_is_short(0.40, 0.25, -0.10) is \
+        nav2_watch.arrival_is_short(0.40, 0.25, 0.10)
+
+
+def test_a_margin_that_is_not_a_number_is_refused_by_name():
+    with pytest.raises(nav2_watch.Nav2WatchError) as caught:
+        nav2_watch.arrival_is_short(0.30, 0.25, None)
+    assert "margin" in str(caught.value)

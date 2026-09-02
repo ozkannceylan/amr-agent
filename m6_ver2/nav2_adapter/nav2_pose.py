@@ -194,6 +194,25 @@ def to_world(frame, x, y, yaw=None):
     return frame.to_world(x, y, yaw)
 
 
+def floor_margin_m(frame):
+    """What the committed registration says it is worth, in metres.
+
+    THE SAME FIGURE `floor_sentence` PRINTS, as a number. It is the
+    registration's MAX residual against the building, and it is the
+    widest two beliefs of one truck may honestly disagree by: the
+    adapter reads the estimate through this transform and nav2 reads
+    AMCL's map pose directly, so a boundary they are both checking at
+    0.25 m is a boundary they can straddle (nav2_watch.arrival_is_short,
+    defect D6).
+
+    A TRANSFORM THAT STATES NO RESIDUAL IS WORTH NOTHING HERE, and says
+    so with a zero rather than with a guess - which restores exactly the
+    behaviour that had no margin at all.
+    """
+    residual = getattr(frame, "residual_max_m", None)
+    return 0.0 if residual is None else abs(float(residual))
+
+
 def floor_sentence(frame):
     """The sentence every absolute figure through this frame is read with.
 

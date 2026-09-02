@@ -38,6 +38,7 @@ for _sub in (os.path.join(_M6V2, "tools"),):
 
 import instantiate_truck as itk                            # noqa: E402
 import nav2_adapter_node as shell                          # noqa: E402
+import nav2_envelope                                       # noqa: E402
 import nav2_legs                                           # noqa: E402
 import nav2_pose                                           # noqa: E402
 import nav2_seed                                           # noqa: E402
@@ -746,7 +747,92 @@ def test_the_speed_limit_is_republished_on_change(rig):
     assert len(rig.node.pubs[rig.cfg.s("topics.speed_limit")].sent) == 1
     rig.status(v_limit=1500)
     assert rig.node.pubs[rig.cfg.s("topics.speed_limit")].sent[-1] == {
-        "speed_limit": 1.5, "percentage": False}
+        "speed_limit": 0.3, "percentage": False}
+
+
+def _on_the_station_spur(driving):
+    """Drive the fixture route to its FINAL leg and hand back the handle.
+
+    The station spur is the only leg allowed to run to completion, so it
+    is the only one whose SUCCEEDED reaches the arrival verdict at all.
+    """
+    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    driving.tick()
+    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
+    assert driving.adapter.legs[driving.adapter.leg_i].final
+    return driving.action.handles[1]
+
+
+def test_a_boundary_arrival_is_an_arrival_and_not_a_block(driving):
+    """D6, run4 - nav2 SUCCEEDED half a millimetre outside arrive_m.
+
+    The adapter's `arrive_m` and nav2's `station_goal_checker` are the
+    same 0.25 m read off two beliefs sampled at two instants: nav2
+    checks AMCL's map pose, the adapter checks the composed estimate
+    through the committed registration. Three arrivals at S1 in one run
+    measured 0.2453, 0.2482 and 0.2502 m, and the third one BLOCKED the
+    task and put it back on the fleet's queue.
+    """
+    handle = _on_the_station_spur(driving)
+    driving.tf_at(-13.0, 4.25 + 0.2502)
+    driving.tick()
+    assert driving.adapter.state.state != nav2_state.ARRIVED,         "the fixture must stand OUTSIDE arrive_m or it proves nothing"
+    handle.result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
+    assert driving.adapter.state.state == nav2_state.ARRIVED
+    driving.tick()
+    assert driving.state["state"] == nav2_state.ARRIVED
+    assert "arrived short" not in (driving.state.get("note") or "")
+
+
+def test_an_arrival_a_metre_out_is_still_a_named_miss(driving):
+    # m5v3's S7 orbit - a stable 0.643-0.742 m ring round a station the
+    # truck can never reach - is what this note exists for, and it is a
+    # long way outside the registration's own residual.
+    handle = _on_the_station_spur(driving)
+    driving.tf_at(-13.0, 4.25 + 1.0)
+    driving.tick()
+    handle.result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
+    assert driving.adapter.state.state == nav2_state.BLOCKED
+    driving.tick()
+    assert "arrived short" in driving.state["note"]
+
+
+def test_the_arrival_margin_is_the_registrations_own_residual(rig):
+    """ONE HOME: the committed transform states what it is worth."""
+    assert rig.adapter.arrival_margin_m == nav2_pose.floor_margin_m(
+        rig.adapter.frame)
+    assert 0.0 < rig.adapter.arrival_margin_m < 0.25
+
+
+def test_no_published_speed_limit_ever_widens_the_envelope(rig):
+    """D4, run3, 2026-09-02 - measured, and this is the guard.
+
+    `setSpeedLimit` REPLACES a controller's configured maximum rather
+    than intersecting with it. The adapter published the unrestricted
+    permission ABSOLUTE - V_Limit 1500 mm/s as `speed_limit 1.5` - onto
+    a controller whose envelope is 0.300, and the next /f1/cmd_vel row
+    carried -1.5. A permission is a permission to go SLOWER.
+    """
+    envelope = rig.adapter.envelope_max_mps
+    assert envelope == 0.300
+    for v_limit in (300, 1500, 700, 99999, -1, 300):
+        rig.status(v_limit=v_limit)
+    sent = rig.node.pubs[rig.cfg.s("topics.speed_limit")].sent
+    assert sent, "the permission was never published at all"
+    for row in sent:
+        assert row["speed_limit"] <= envelope + 1e-12, row
+        assert row["percentage"] is False
+
+
+def test_the_envelope_is_read_from_nav2s_own_params_file(rig):
+    """ONE HOME. The number is nav2.yaml's; config.yaml does not repeat it."""
+    path = os.path.join(_REPO, rig.cfg.s("nav.params_file"))
+    assert rig.adapter.envelope_max_mps == nav2_envelope.envelope_max_mps_of(
+        path)
+    assert rig.adapter.limits.envelope_max_mps == rig.adapter.envelope_max_mps
 
 
 # ----------------------------------------------------------------------

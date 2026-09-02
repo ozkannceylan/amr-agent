@@ -69,6 +69,7 @@ import _donors                                            # noqa: F401
 
 import follower                                           # noqa: E402
 import nav2_cmd                                           # noqa: E402
+import nav2_envelope                                      # noqa: E402
 import nav2_legs                                          # noqa: E402
 import nav2_pose                                          # noqa: E402
 import nav2_state                                         # noqa: E402
@@ -97,6 +98,7 @@ REQUIRED_KEYS = (
     "navcmd.steer_command_limit_rad", "navcmd.speed_max_mps",
     "navcmd.creep_speed_mps", "navcmd.zero_speed_mps",
     "navcmd.yawrate_refusal_radps", "navcmd.command_timeout_s",
+    "nav.params_file",
     "nav.bt_xml", "nav.bt_xml_rpp", "nav.bt_xml_station",
     "nav.watchdog.required_closing_m", "nav.watchdog.closing_allowance_s",
 )
@@ -269,11 +271,20 @@ class Adapter(object):
         self._now = clock_s or time.monotonic
 
         self.state = nav2_state.NavState()
+        # NAV2's OWN CEILING, OUT OF NAV2's OWN FILE (D4, run3). The
+        # controller_server is launched with `nav.params_file` and this
+        # reads that same path, so the number the adapter narrows nav2
+        # to and the number nav2 was configured with cannot drift apart.
+        # A copy of it in config.yaml would be a second ceiling, and the
+        # first one edited would be the one that was right.
+        self.envelope_max_mps = nav2_envelope.envelope_max_mps_of(
+            os.path.join(_donors.REPO, cfg.s("nav.params_file")))
         self.limits = nav2_cmd.limits_from_config({
             "wheelbase_m": cfg.f("vehicle.wheelbase_m"),
             "steer_limit_rad": cfg.f("vehicle.steer_limit_rad"),
             "steer_command_limit_rad": cfg.f("navcmd.steer_command_limit_rad"),
             "traction_max_mps": cfg.f("navcmd.speed_max_mps"),
+            "envelope_max_mps": self.envelope_max_mps,
             "creep_speed_mps": cfg.f("navcmd.creep_speed_mps"),
             "zero_speed_mps": cfg.f("navcmd.zero_speed_mps"),
             "yawrate_refusal_radps": cfg.f("navcmd.yawrate_refusal_radps"),
@@ -286,6 +297,12 @@ class Adapter(object):
         self.frame = nav2_pose.load_frame(os.path.join(
             _donors.REPO, cfg.s("map.dir"), cfg.s("map.name"),
             cfg.s("map.registration.file")))
+        # WHAT THE TRANSFORM SAYS IT IS WORTH, carried because the
+        # arrival verdict needs it: nav2 checks its goal against AMCL's
+        # map pose and this node checks the same 0.25 m against the
+        # estimate composed through that transform, so the two can
+        # straddle one boundary (defect D6, run4).
+        self.arrival_margin_m = nav2_pose.floor_margin_m(self.frame)
         # THE THREE TREES, KEYED BY THE NAME nav2_legs.CLASS_TREE USES.
         # The dict is built from that table rather than typed out, so a
         # leg class that names a fourth tree is a KeyError on the config
@@ -654,10 +671,19 @@ class Adapter(object):
         # re-sent 0.4 m goal is inside this vehicle's turning circle and
         # m5v3 measured what that produces - the S7 orbit, a stable ring
         # round a station the truck can never reach.
+        #   AND "SHORT" HAS A MARGIN, WHICH IS THE REGISTRATION'S OWN
+        # RESIDUAL (defect D6). Inside it the two checkers are reading
+        # one boundary off two beliefs and nav2's is the one that
+        # actually stopped the truck, so the adapter takes its word and
+        # LATCHES rather than blocking a completed pick.
         world = self._world_xy()
         known = world is not None and self.state.route
         distance = (math.dist(world, self.state.route[-1]) if known
                     else float("inf"))
+        if not nav2_watch.arrival_is_short(distance, self.state.arrive_m,
+                                           self.arrival_margin_m):
+            self.state.accept_arrival()
+            return
         self.state.block(nav2_watch.arrived_short_note(distance,
                                                        self.state.arrive_m))
 
@@ -754,8 +780,16 @@ class Adapter(object):
         the permission, nav2_cmd clamps the twist at source, and
         cmd_gate still has the last word. Two ceilings on one quantity
         is a min(), which is idempotent.
+
+        AND THE MESSAGE IS CAPPED AT nav2's OWN ENVELOPE, because
+        `setSpeedLimit` REPLACES a controller's maximum rather than
+        intersecting with it: an unrestricted permission published raw
+        RAISES nav2's ceiling, which is exactly what put the truck into
+        the S1 spur at 700 mm/s in run3 (D4). A permission is a
+        permission to go slower.
         """
-        row = nav2_cmd.speed_limit_message(v_limit_mm_s)
+        row = nav2_cmd.speed_limit_message(v_limit_mm_s,
+                                           self.envelope_max_mps)
         self.pubs["speed_limit"].publish(self.msgs.speed_limit(row))
 
     # ------------------------------ helpers ------------------------------
@@ -957,11 +991,18 @@ def main(argv=None):
     node = Node("nav2_adapter")
     adapter = Adapter(node, _messages(), cfg, args.vid, args.world_frame)
     adapter.build(wiring(cfg, args.vid))
+    # EVERY CEILING THIS NODE WILL OBEY, PRINTED ONCE. A number that
+    # decides what the truck does and is never said out loud is a number
+    # nobody can check against the file it came from - which is how D4
+    # (nav2's envelope) and D6 (the arrival margin) were both invisible
+    # until a truck was on the floor.
     node.get_logger().info(
-        "nav2 adapter up on /{}: {} legs table, arrive_m {:.2f}, "
+        "nav2 adapter up on /{}: {} legs table, arrive_m {:.2f} "
+        "(+{:.4f} m registration margin), nav2 envelope {:.3f} m/s, "
         "watchdog {:.2f} m / {:.0f} s, world frame {}".format(
             args.vid, "/".join(nav2_legs.CLASS_TREE),
-            follower.ARRIVE_M, adapter.required_closing_m,
+            follower.ARRIVE_M, adapter.arrival_margin_m,
+            adapter.envelope_max_mps, adapter.required_closing_m,
             adapter.closing_allowance_s, args.world_frame))
     try:
         rclpy.spin(node)

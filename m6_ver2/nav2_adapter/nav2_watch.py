@@ -201,6 +201,41 @@ def blocked_note_for_error(error_code):
     return "blocked: nav2 refused (error_code {})".format(code)
 
 
+def arrival_is_short(distance_m, arrive_m, margin_m):
+    """Is nav2's SUCCEEDED a MISS, or two beliefs at one boundary?
+
+    D6, MEASURED (run4, 2026-09-02). nav2's `station_goal_checker` and
+    the adapter's `arrive_m` are THE SAME NUMBER - 0.25 m - read off two
+    different beliefs at two different instants: nav2 checks AMCL's map
+    pose inside the controller loop, the adapter checks the composed
+    estimate through the committed registration on its own 20 Hz tick.
+    Three arrivals at S1 in one run came in at 0.2453, 0.2482 and
+    0.2502 m, and the third - five tenths of a millimetre outside - made
+    a completed pick an "arrived short", BLOCKED the task and put it
+    back on the fleet's queue.
+
+    THE MARGIN IS NOT A FUDGE AND IT IS NOT A NEW NUMBER. It is the
+    committed registration's own residual against the building, which
+    the transform states and every boot prints ("registration residual
+    rms 0.0291 m, MAX 0.1179 m"): two beliefs of one truck cannot be
+    asked to agree closer than the transform between their frames is
+    known. A registration that states no residual buys no margin.
+
+    AND THE VERDICT THIS EXISTS FOR IS UNTOUCHED. m5v3's S7 orbit is a
+    stable 0.643-0.742 m ring round a station the truck can never reach,
+    which is 1.7 times the widest this rule will ever accept.
+    """
+    try:
+        margin = abs(float(margin_m))
+    except (TypeError, ValueError):
+        raise Nav2WatchError(
+            "the arrival margin is {!r}, which is not a number. It is "
+            "the committed registration's own residual and there is no "
+            "default for it: a margin nobody measured is a tolerance "
+            "nobody chose".format(margin_m))
+    return float(distance_m) > float(arrive_m) + margin
+
+
 def arrived_short_note(distance_m, arrive_m):
     """Nav2 said SUCCEEDED and the belief never entered `arrive_m`.
 
@@ -305,6 +340,16 @@ def _selftest():
             check("{} is refused by name".format(what), False)
         except Nav2WatchError:
             check("{} is refused by name".format(what), True)
+
+    check("two beliefs half a millimetre apart at one 0.25 m boundary "
+          "are not a miss (D6)",
+          not arrival_is_short(0.2502, 0.25, 0.1179)
+          and not arrival_is_short(0.3679, 0.25, 0.1179))
+    check("and m5v3's 0.643 m S7 orbit still is",
+          arrival_is_short(0.643, 0.25, 0.1179)
+          and arrival_is_short(float("inf"), 0.25, 0.1179))
+    check("a registration that states no residual buys no margin",
+          arrival_is_short(0.2502, 0.25, 0.0))
 
     for name in ran:
         print("{}  {}".format("FAIL" if name in fails else "pass", name))

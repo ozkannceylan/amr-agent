@@ -312,6 +312,24 @@ class NavState(object):
         self.state, self.reversing = ARRIVED, False
         return True
 
+    def accept_arrival(self):
+        """Latch ARRIVED on NAV2's verdict rather than on our own radius.
+
+        THE SAME LATCH, THROUGH THE OTHER DOOR. `check_arrival` is the
+        adapter's own 20 Hz reading; this is the one the goal checker
+        took, and the two are the same 0.25 m over two beliefs that can
+        straddle it (nav2_watch.arrival_is_short, defect D6). It is
+        idempotent for the same reason check_arrival is: the fleet has
+        already been told.
+        """
+        if self.route is None or self.goal is None:
+            return False
+        if self._arrived_for == self.goal:
+            return False
+        self._arrived_for = self.goal
+        self.state, self.reversing = ARRIVED, False
+        return True
+
     def block(self, note):
         """A named nav2 failure or the adapter's own watchdog.
 

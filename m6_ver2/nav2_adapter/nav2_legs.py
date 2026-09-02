@@ -277,16 +277,31 @@ def split_legs(polyline):
     return legs
 
 
-def classify(leg_points, first, final):
+def classify(leg_points, final):
     """The class of one leg, from the geometry and stations.STATIONS.
 
     PRECEDENCE, STATED: a leg that both leaves a station and ends at one
     is a STATION SPUR. The end governs, because the end is what picks
     the goal checker the arrival is decided against.
+
+    A SPUR EXIT IS DECIDED BY WHERE IT STARTS AND NOT BY ITS ORDINAL,
+    and that is defect D5's own sentence (run4, 2026-09-02). The route
+    the fleet hands back after a pick begins with the truck's POSE -
+    0.245 m off the bay, its own arrival error - and then the STATION
+    POINT itself, so the FIRST leg is that 0.245 m of parking error and
+    the real exit is the SECOND one. Asking "is this leg first" gave the
+    class to the parking error and left the bay-to-mouth leg a TRANSIT:
+    MPPI's tree, MPPI's goal checker, and - through leg_yaw - a goal
+    heading that demanded a 180 degree turn inside a dead-end spur. The
+    truck drove it, left the aisle, and latched a protective field.
+      A leg that ENDS on a station is not leaving one, whatever it
+    started on: that is the degenerate leg above, and it is a transit
+    of the truck's own parking error.
     """
     if final and station_at(leg_points[-1]) is not None:
         return STATION_SPUR
-    if first and station_at(leg_points[0]) is not None:
+    if (station_at(leg_points[0]) is not None
+            and station_at(leg_points[-1]) is None):
         return SPUR_EXIT
     return TRANSIT
 
@@ -304,8 +319,7 @@ def plan_legs(polyline):
     chunks = split_legs(polyline)
     legs = []
     for index, points in enumerate(chunks):
-        klass = classify(points, first=(index == 0),
-                         final=(index == len(chunks) - 1))
+        klass = classify(points, final=(index == len(chunks) - 1))
         controller, tree_key = controller_for(klass)
         legs.append(Leg(points=points, start=points[0], end=points[-1],
                         klass=klass, controller=controller,
@@ -322,11 +336,24 @@ def leg_yaw(leg, stations=STATIONS):
     goal sent without one is a goal sent with yaw 0 - which on this
     floor is a quarter turn out of every aisle.
 
-    TWO ANSWERS, AND WHICH ONE APPLIES IS THE SAME QUESTION classify()
+    THREE ANSWERS, AND WHICH ONE APPLIES IS THE SAME QUESTION classify()
     ALREADY ASKED. A leg that ends ON a station ends at the BAY's own
     approach heading, because that is the heading the truck has to
-    arrive on and the bay is not free to choose it. Every other leg ends
+    arrive on and the bay is not free to choose it. A SPUR EXIT ends on
+    that SAME heading - the one it is standing on - because a spur is a
+    dead end and the truck cannot turn round in it. Every other leg ends
     pointing along ITSELF, down the last segment it drove.
+
+    THE SPUR EXIT ROW IS DEFECT D5, MEASURED (run4, 2026-09-02). The
+    exit's last segment points north (+1.5708) and the truck is standing
+    at the bay on -1.5708, so "along itself" asked for a 180 degree turn
+    inside a 5.75 m dead-end spur - and SmacPlannerHybrid, which is
+    heading-aware, planned one: the truck swung to (-11.32, 7.87) at yaw
+    2.51, cusped, reversed north-west out of the aisle to (-13.59,
+    11.45) and the watchdog fired at 30 s without closing; a repeat put
+    it at (-10.42, 12.36) and a protective field latched Motor False.
+    The truck backs into a bay and drives out of it, or drives in and
+    backs out; either way its BODY yaw does not change in the spur.
 
     THE LAST SEGMENT AND NOT THE WHOLE LEG. A leg is near-collinear by
     construction (COLLINEAR_RAD), so the two are the same to within 15
@@ -337,6 +364,11 @@ def leg_yaw(leg, stations=STATIONS):
     was not built by split_legs and the atan2 would be an invention.
     """
     station = station_at(leg.end, stations=stations)
+    if station is None and leg.klass == SPUR_EXIT:
+        # THE BAY BEING LEFT, and only for a leg this file already
+        # called a spur exit: a transit that merely passes a bay keeps
+        # its own heading.
+        station = station_at(leg.start, stations=stations)
     if station is not None:
         try:
             return float(stations[station]["yaw"])
@@ -423,6 +455,21 @@ def _selftest():
     out = plan_legs(route.plan_route((7.0, 4.25), "S9"))
     check("leaving a station is a dead-astern SPUR EXIT",
           out[0].klass == SPUR_EXIT)
+    check("and it leaves on S5's OWN heading - a spur is a dead end and "
+          "the truck does not turn round in it (D5)",
+          abs(leg_yaw(out[0]) - float(STATIONS["S5"]["yaw"])) < 1e-12)
+
+    # THE ROUTE THE FLEET HANDS BACK AFTER A PICK: the pose 0.245 m off
+    # the bay, then the bay itself, then the mouth. The parking error is
+    # a leg and it must not take the spur exit's class with it (D5).
+    parked = plan_legs([(-12.9968, 4.4952), (-13.0, 4.25), (-13.0, 10.0),
+                        (-10.0, 10.0), (-7.0, 10.0)])
+    exits = [leg for leg in parked if leg.klass == SPUR_EXIT]
+    check("the parking error is not the spur exit; the bay-to-mouth leg "
+          "is (D5)",
+          len(exits) == 1 and exits[0].start == (-13.0, 4.25)
+          and exits[0].end == (-13.0, 10.0)
+          and abs(leg_yaw(exits[0]) - float(STATIONS["S1"]["yaw"])) < 1e-12)
     check("S5 -> S9 splits at every junction turn (five legs)",
           len(out) == 5 and out[-1].klass == STATION_SPUR)
 

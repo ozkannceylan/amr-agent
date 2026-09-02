@@ -72,6 +72,33 @@ that is 3.16 times v. So the tread ceiling handed to
 `twist_to_tricycle` is the permission too. Clamping the tread with delta
 HELD scales v and w together, so that cap is curvature preserving as
 well: the truck drives the same arc, more slowly.
+
+LAYER 1 WAS BACKWARDS UNTIL 2026-09-02 AND IT DROVE THE TRUCK INTO A
+LATCH (m6_ver2/logs/run3-speed-limit-latch, defect D4). `setSpeedLimit`
+REPLACES a controller's configured maximum rather than intersecting
+with it, so publishing an UNRESTRICTED permission - V_Limit 1500 mm/s as
+`speed_limit 1.5` - did not tell nav2 to stay under anything. It raised
+nav2's envelope from 0.300 to 1.500, /fN/cmd_vel came back carrying
+-1.5, and layer 2 clamped it at the only ceiling it then knew about:
+config.yaml's `navcmd.speed_max_mps` of 0.700. The truck entered the S1
+spur at 700 mm/s, where the warning field drops V_Limit to 300 BY
+DESIGN, and the F-program latched.
+
+So both layers now carry nav2's OWN configured ceiling as well, read
+from the params file the controller_server is launched with
+(nav2_envelope.py, config.yaml `nav.params_file` - ONE home, and it is
+nav2's):
+
+  `speed_limit_message` publishes min(permission, envelope): a
+  permission may NARROW nav2 and may never widen it.
+  `shaft_ceiling` is min(measurement coverage, envelope, permission):
+  the wheel is under all three at once, so a permission that drops to
+  meet it finds it already there.
+
+That second cap also closes the cos(delta) half of the same defect. At
+0.300 m/s of body and 0.58 rad of steer the SHAFT runs 0.385 m/s, so a
+truck driving exactly inside nav2's envelope was already 28 % over a
+300 mm/s permission with nothing broken at all.
 """
 import argparse
 import collections
@@ -97,7 +124,8 @@ class Nav2CmdError(ValueError):
 Limits = collections.namedtuple(
     "Limits",
     "wheelbase_m steer_limit_rad steer_command_limit_rad curvature_max_1pm "
-    "traction_max_mps creep_speed_mps zero_speed_mps yawrate_refusal_radps")
+    "traction_max_mps envelope_max_mps creep_speed_mps zero_speed_mps "
+    "yawrate_refusal_radps")
 
 #: WHAT COMES OUT, AS A RECORD. `linear_x` and `angular_z` are the two
 #: fields of `/auto/cmd_vel` and nothing else in the adapter has to know
@@ -117,8 +145,8 @@ AutoCmd = collections.namedtuple(
 #: The keys a per-truck config's vehicle block has to carry, in the
 #: order the refusal lists them.
 LIMIT_KEYS = ("wheelbase_m", "steer_limit_rad", "steer_command_limit_rad",
-              "traction_max_mps", "creep_speed_mps", "zero_speed_mps",
-              "yawrate_refusal_radps")
+              "traction_max_mps", "envelope_max_mps", "creep_speed_mps",
+              "zero_speed_mps", "yawrate_refusal_radps")
 
 
 def limits_from_config(block):
@@ -131,7 +159,7 @@ def limits_from_config(block):
     missing = [key for key in LIMIT_KEYS if key not in block]
     if missing:
         raise Nav2CmdError(
-            "the vehicle limits block carries no {}. All seven are "
+            "the vehicle limits block carries no {}. All eight are "
             "required and none has a default: {}".format(
                 ", ".join(missing), ", ".join(LIMIT_KEYS)))
     values = {key: float(block[key]) for key in LIMIT_KEYS}
@@ -155,6 +183,13 @@ SELFTEST_LIMITS = limits_from_config({
     "steer_limit_rad": 1.31,
     "steer_command_limit_rad": 1.25,
     "traction_max_mps": 1.50,
+    # THE FIXTURE'S ENVELOPE IS ITS OWN TRACTION CEILING, deliberately:
+    # these checks are about the SIGNS, and a binding envelope would
+    # have every one of them arguing with a cap. The RUNTIME reads
+    # nav2.yaml, where f1's is 0.300 - five times lower than the
+    # permission that produced run3's latch, which is the whole point
+    # of the number existing.
+    "envelope_max_mps": 1.50,
     "creep_speed_mps": 0.005,
     "zero_speed_mps": 0.001,
     "yawrate_refusal_radps": 0.01,
@@ -173,15 +208,29 @@ def limit_mps_from_v_limit(v_limit_mm_s):
     return speed_limit_mm_s(v_limit_mm_s) / 1000.0
 
 
-def speed_limit_message(v_limit_mm_s):
+def speed_limit_message(v_limit_mm_s, envelope_max_mps):
     """`nav2_msgs/SpeedLimit`'s two fields, as data for the shell.
 
     ABSOLUTE AND NOT A PERCENTAGE. A percentage is a fraction of
     whatever the controller thinks its maximum is, and that is a second
     number the PLC has never heard of; V_Limit is metres per second at
     the shaft and it is published as metres per second.
+
+    AND IT IS CAPPED AT nav2's OWN ENVELOPE, WHICH IS WHY THAT ARGUMENT
+    HAS NO DEFAULT. `setSpeedLimit` REPLACES a controller's configured
+    maximum rather than intersecting with it - MPPI scales its whole
+    envelope by `speed_limit / vx_max`, RPP assigns
+    `desired_linear_vel = speed_limit` - so an unrestricted permission
+    published raw is a five-fold RAISE on this truck, and it was
+    (m6_ver2/logs/run3-speed-limit-latch: V_Limit 1500 went out as 1.5,
+    the next /f1/cmd_vel row carried -1.5, the wheel reached 700 mm/s
+    and the S1 warning field's 300 mm/s permission latched the
+    F-program's speed monitor). A PERMISSION IS A PERMISSION TO GO
+    SLOWER: it may narrow this envelope and it may never widen it.
+    nav2_envelope.py is where the other operand of that min() is read.
     """
-    return {"speed_limit": limit_mps_from_v_limit(v_limit_mm_s),
+    return {"speed_limit": min(limit_mps_from_v_limit(v_limit_mm_s),
+                               abs(float(envelope_max_mps))),
             "percentage": False}
 
 
@@ -198,24 +247,58 @@ def is_reversing(linear_x, limits):
     return float(linear_x) > abs(limits.creep_speed_mps)
 
 
+def shaft_ceiling(limits, limit_mps=None):
+    """The fastest this truck's WHEEL may turn, in m/s. A min() of three.
+
+    THE MONITOR READS THE SHAFT, so this is the quantity every ceiling
+    has to be expressed in. Measured 2026-09-02 on run3: at 0.300 m/s of
+    BODY and 0.58 rad of steer the shaft ran 0.385 m/s, because
+    v_w = v / cos(delta) - so a truck inside nav2's own envelope was
+    already 28 % over a 300 mm/s permission before anything went wrong.
+
+      1. `traction_max_mps` - config.yaml `navcmd.speed_max_mps`, which
+         bounds MEASUREMENT COVERAGE: above it this plant is unmeasured.
+      2. `envelope_max_mps` - nav2.yaml's own configured controller
+         ceiling (nav2_envelope.py). nav2 asking for more than this is
+         nav2 having been WIDENED by something, and the answer to that
+         is not to drive it.
+      3. `limit_mps` - the live PLC permission, or None for unrestricted.
+         NOT KNOWING is not this function's business: status_contract
+         has already narrowed an unreadable V_Limit to the creep
+         ceiling by the time it gets here.
+
+    A min() IS IDEMPOTENT AND HAS NO ORDER, which is the whole reason
+    three independent ceilings can be applied on one wire without any of
+    them having to know about the others.
+    """
+    ceiling = min(abs(limits.traction_max_mps), abs(limits.envelope_max_mps))
+    if limit_mps is not None:
+        ceiling = min(ceiling, abs(limit_mps))
+    return ceiling
+
+
 def translate(v, w, limits, limit_mps=None):
     """One smoothed twist as one `/auto/cmd_vel` message.
 
     `limit_mps` is the live V_Limit permission as a ceiling in m/s, or
     None for no limit. NO LIMIT IS NOT A STOP - the SpeedLimit message's
     own comment says so, and a translator that read a lifted limit as a
-    brake would stop the truck every time the aisle cleared.
+    brake would stop the truck every time the aisle cleared. A LIFTED
+    PERMISSION IS STILL NOT A LICENCE: `shaft_ceiling` below is a min()
+    of three ceilings and the permission is only one of them.
     """
-    v, w = tri.apply_speed_limit(v, w, limit_mps)
-    traction_ceiling = abs(limits.traction_max_mps)
-    if limit_mps is not None:
-        traction_ceiling = min(traction_ceiling, abs(limit_mps))
+    ceiling = shaft_ceiling(limits, limit_mps)
+    # THE BODY FIRST, AND AT THE SAME NUMBER. Scaling v and w together
+    # holds w/v and therefore holds the steer ANGLE exactly, so what
+    # this costs is speed and never the arc; the shaft clamp inside
+    # twist_to_tricycle then takes the last, smaller, bite for cos(delta).
+    v, w = tri.apply_speed_limit(v, w, ceiling)
     out = tri.twist_to_tricycle(
         v, w,
         wheelbase_m=limits.wheelbase_m,
         steer_limit_rad=limits.steer_limit_rad,
         curvature_max_1pm=limits.curvature_max_1pm,
-        traction_max_mps=traction_ceiling,
+        traction_max_mps=ceiling,
         creep_speed_mps=limits.creep_speed_mps,
         zero_speed_mps=limits.zero_speed_mps,
         yawrate_refusal_radps=limits.yawrate_refusal_radps)
@@ -314,8 +397,32 @@ def _selftest():
           and limit_mps_from_v_limit(-1) == 0.300
           and limit_mps_from_v_limit(99999) == 0.300)
     check("the SpeedLimit message is absolute and not a percentage",
-          speed_limit_message(300) == {"speed_limit": 0.300,
-                                       "percentage": False})
+          speed_limit_message(300, 1.500) == {"speed_limit": 0.300,
+                                              "percentage": False})
+    check("a permission may NARROW nav2's envelope",
+          speed_limit_message(300, 0.700)["speed_limit"] == 0.300)
+    check("and it may never WIDEN it - D4, run3, the S1 latch",
+          all(speed_limit_message(v, 0.300)["speed_limit"] <= 0.300 + 1e-12
+              for v in (300, 1500, 99999, None, -1)))
+
+    # THE FIELD TRUCK'S OWN THREE CEILINGS, as f1 carries them: 0.700 of
+    # measurement coverage (config.yaml navcmd.speed_max_mps), 0.300 of
+    # nav2 envelope (nav2.yaml FollowPath.vx_max) and whatever the PLC
+    # is permitting. run3's rows are the fixture in the suite.
+    field = limits_from_config(dict(
+        SELFTEST_LIMITS._asdict(), traction_max_mps=0.700,
+        envelope_max_mps=0.300))
+    check("the shaft ceiling is the LOWEST of the three",
+          shaft_ceiling(field) == 0.300
+          and shaft_ceiling(field, 1.500) == 0.300
+          and shaft_ceiling(field, 0.100) == 0.100)
+    check("nav2 asking for 1.5 m/s leaves the terminals at 0.300",
+          abs(translate(-1.500, 0.0, field, limit_mps=1.500).linear_x)
+          <= 0.300 + 1e-12)
+    check("and at 0.58 rad of steer the SHAFT is still under 0.300, "
+          "which is the reading the F-program takes",
+          abs(translate(-0.3045, -0.1873, field,
+                        limit_mps=1.500).linear_x) <= 0.300 + 1e-12)
 
     row = out(0.0, 0.400)
     check("a yaw rate at a STANDSTILL is refused, traction zero, steer "

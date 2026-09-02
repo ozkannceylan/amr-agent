@@ -299,3 +299,101 @@ def test_the_selftest_is_green():
 def test_the_collinear_tolerance_admits_a_parking_error_and_not_a_turn():
     assert nav2_legs.COLLINEAR_RAD < math.pi / 2.0
     assert nav2_legs.COLLINEAR_RAD > math.radians(5.0)
+
+
+# ----------------------------------------------------------------------
+# D5 - THE LEG OUT OF A BAY, run4, 2026-09-02
+#
+# m6_ver2/logs/run4-spur-exit-turnaround. After the pick at S1 the fleet
+# hands back a route that starts with the truck's POSE - 0.245 m off the
+# bay, its own arrival error - and then the STATION POINT itself:
+#
+#   [(-12.9968, 4.4952), (-13.0, 4.25), (-13.0, 10.0), (-10.0, 10.0), ...]
+#
+# TWO THINGS WENT WRONG WITH THAT AND THEY COMPOUND.
+#
+#   1. That 0.245 m first segment is a LEG, and being the route's first
+#      it took the SPUR EXIT class with it. The real exit - the bay to
+#      the spur mouth - was then a TRANSIT.
+#   2. leg_yaw gave that exit the heading of its own last segment,
+#      +1.5708 (north). The truck was standing at the bay on the bay's
+#      heading, -1.5708. So the goal at the spur mouth demanded a 180
+#      degree TURN inside a 5.75 m dead-end spur, and SmacPlannerHybrid
+#      planned one: measured, the truck swung out to (-11.32, 7.87) with
+#      yaw 2.51, cusped, and reversed north-west out of the aisle
+#      entirely, ending at (-13.59, 11.45) where the adapter's own
+#      watchdog fired at 30 s without closing. On a later repeat the
+#      same manoeuvre put it at (-10.42, 12.36) and a PROTECTIVE field
+#      latched Motor False.
+#
+# A SPUR IS DRIVEN AT THE BAY'S OWN HEADING IN BOTH DIRECTIONS. The
+# truck backs in and drives out, or drives in and backs out; either way
+# it does not turn round in the aisle it cannot turn round in.
+# ----------------------------------------------------------------------
+
+#: The route the fleet published as ft-260b29ed, verbatim off the wire.
+RUN4_OUT_OF_S1 = [
+    (-12.996778498620323, 4.495172559486896), (-13.0, 4.25), (-13.0, 10.0),
+    (-10.0, 10.0), (-7.0, 10.0), (-3.5, 10.0), (0.0, 10.0), (0.0, 0.0),
+    (0.0, -10.0), (-3.5, -10.0), (-7.0, -10.0), (-7.0, -4.25)]
+
+
+def _leg_ending_at(legs, point):
+    matches = [leg for leg in legs if leg.end == point]
+    assert len(matches) == 1, "no single leg ends at {}".format(point)
+    return matches[0]
+
+
+def test_the_real_exit_out_of_a_bay_is_the_spur_exit():
+    legs = nav2_legs.plan_legs(RUN4_OUT_OF_S1)
+    exit_leg = _leg_ending_at(legs, (-13.0, 10.0))
+    assert exit_leg.start == (-13.0, 4.25)
+    assert exit_leg.klass == nav2_legs.SPUR_EXIT
+    assert exit_leg.tree_key == "nav.bt_xml_rpp"
+    assert exit_leg.controller == "rpp"
+
+
+def test_the_parking_error_leg_is_not_the_spur_exit():
+    # 0.245 m from the pose to the bay it is standing on. It is the
+    # truck's own arrival error with a goal drawn on it, and it neither
+    # leaves the bay nor arrives anywhere.
+    legs = nav2_legs.plan_legs(RUN4_OUT_OF_S1)
+    first = legs[0]
+    assert math.dist(first.start, first.end) < nav2_legs.ON_STATION_M
+    assert first.klass != nav2_legs.SPUR_EXIT
+
+
+def test_a_spur_exit_ends_on_the_bays_own_heading():
+    # THE 180 DEGREE TURN, REFUSED. The last segment points north
+    # (+1.5708); the bay's heading is -1.5708; the truck is standing on
+    # the bay ON that heading, and the way out is straight.
+    legs = nav2_legs.plan_legs(RUN4_OUT_OF_S1)
+    exit_leg = _leg_ending_at(legs, (-13.0, 10.0))
+    segment = math.atan2(exit_leg.end[1] - exit_leg.points[-2][1],
+                         exit_leg.end[0] - exit_leg.points[-2][0])
+    assert abs(segment - math.pi / 2.0) < 1e-9
+    assert nav2_legs.leg_yaw(exit_leg) == float(STATIONS["S1"]["yaw"])
+    assert abs(abs(nav2_legs.leg_yaw(exit_leg) - segment) - math.pi) < 1e-9
+
+
+def test_every_spur_exit_leaves_on_its_own_bays_heading():
+    # Every bay on the floor, not just the one that was measured.
+    for station_id, station in STATIONS.items():
+        poly = _plan((station["x"], station["y"]), "S12"
+                     if station_id != "S12" else "S1")
+        legs = nav2_legs.plan_legs(poly)
+        exits = [leg for leg in legs if leg.klass == nav2_legs.SPUR_EXIT]
+        assert len(exits) == 1, station_id
+        assert nav2_legs.leg_yaw(exits[0]) == float(station["yaw"]), station_id
+
+
+def test_the_spur_exit_reads_one_station_table_and_not_two():
+    moved = {"S5": {"x": 100.0, "y": 100.0, "yaw": 0.5, "arrive_m": 0.25}}
+    leg = nav2_legs.Leg(points=[(100.0, 100.0), (100.0, 105.0)],
+                        start=(100.0, 100.0), end=(100.0, 105.0),
+                        klass=nav2_legs.SPUR_EXIT, controller="rpp",
+                        tree_key="nav.bt_xml_rpp", final=False)
+    assert nav2_legs.leg_yaw(leg, stations=moved) == 0.5
+    # the real table has no bay out there, so the same leg falls back to
+    # its own last segment rather than inventing a heading
+    assert nav2_legs.leg_yaw(leg) == math.pi / 2.0
