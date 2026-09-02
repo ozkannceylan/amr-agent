@@ -1124,8 +1124,11 @@ def test_the_leg_after_a_bay_mouth_is_built_on_the_yaw_at_the_SEND(rig):
     """
     _at_s1(rig, float(STATIONS["S1"]["yaw"]))
     rig.route(OUT_OF_S1)
+    # THREE LEGS SINCE D12: the 13 m ring leg is opened by its own
+    # alignment leg, which is collinear with it and therefore takes the
+    # same goal heading - so the yaw this test is about is unchanged.
     assert [leg.klass for leg in rig.adapter.legs] == [
-        nav2_legs.SPUR_EXIT, nav2_legs.TRANSIT]
+        nav2_legs.SPUR_EXIT, nav2_legs.ALIGN, nav2_legs.TRANSIT]
     # ONE TREE, SO NAV2 WOULD ALLOW THE PREEMPTION. The refusal is ours.
     assert rig.adapter.legs[0].tree_key == rig.adapter.legs[1].tree_key
     rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.3)
@@ -1254,7 +1257,7 @@ def test_every_goal_this_shell_builds_names_its_leg_in_the_log(rig):
     _at_s1(rig, float(STATIONS["S1"]["yaw"]))
     rig.route(OUT_OF_S1)
     assert len(lines) == 1
-    assert "leg 1/2" in lines[0]
+    assert "leg 1/3" in lines[0]
     assert nav2_legs.SPUR_EXIT in lines[0]
     assert "nav.bt_xml_rpp" in lines[0]
     assert "-1.571" in lines[0]

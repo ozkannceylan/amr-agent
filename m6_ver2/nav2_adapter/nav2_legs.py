@@ -75,6 +75,15 @@ SPUR_EXIT = "spur exit"
 #: Everything else. Aisle running, on the ring, the spine or the pick.
 TRANSIT = "transit"
 
+#: THE SHORT ON-RING GOAL THAT OPENS A LONG LEG ENTERED OFF A TURN
+#: (defect D12, run 12, 2026-09-02). Its own class rather than a flag on
+#: a transit, because everything that reads a leg has to be able to see
+#: it: the adapter logs the class on dispatch, DRIVEN_TO_ITS_GOAL is
+#: keyed on it, and an operator reading `leg 2/6 align` on a rig is
+#: reading the reason the truck stopped on an empty aisle. See
+#: _align_split for the measurement.
+ALIGN = "align"
+
 #: LEG CLASS -> (controller name, the config.yaml key holding its tree).
 #: This generalises m5v3's per-origin rule (G5 Task 7) to per-leg, and
 #: it is deliberately shaped like drive_goal.CONTROLLER_TREE - one
@@ -126,6 +135,13 @@ CLASS_TREE = collections.OrderedDict((
     (STATION_SPUR, ("rpp", "nav.bt_xml_station")),
     (SPUR_EXIT, ("rpp", "nav.bt_xml_rpp")),
     (TRANSIT, ("rpp", "nav.bt_xml_rpp")),
+    # THE ALIGNMENT LEG RUNS THE TRANSIT'S OWN TREE, and that is not a
+    # convenience: it is half of what makes the split cheap. nav2
+    # refuses a preemption that changes the BT XML, so a leg on a
+    # different tree would cost a cancel at the boundary it was added
+    # to smooth. Same tree, same 0.60 m checker; the only thing this row
+    # changes about the leg is that it is short and that it stops.
+    (ALIGN, ("rpp", "nav.bt_xml_rpp")),
 ))
 
 # ----------------------------- the numbers -----------------------------
@@ -156,6 +172,33 @@ PREEMPT_AT_M = 1.5
 #: MPPI any more, but it is still the widest endgame this stack has
 #: configured and therefore still the one P has to clear.
 MPPI_GOAL_THRESHOLD_M = 1.4
+
+#: HOW FAR ALONG A LEG ITS ALIGNMENT GOAL SITS (defect D12).
+#:   IT HAS TO CLEAR PREEMPT_AT_M, and that is the whole of the lower
+#: bound: _merge_short folds any non-final run shorter than P forward,
+#: so an alignment leg at or under P would be deleted by the next line
+#: of the same function and the long goal would be back at the turn.
+#:   AND IT HAS TO BE LONGER THAN THE TRUCK. The model is 3.815 m over
+#: the tines and 1.4 m over the chassis with a 1.25 m turning radius
+#: (runs_to_its_goal), so a goal closer than a body length is a goal the
+#: truck is already standing on the far side of its own turn from.
+#: 2.75 m clears P by 1.25 m and the chassis by 1.35, and it is short
+#: enough that the quarter turn is the ONLY thing in the plan - which is
+#: the point: one goal, one decision.
+ALIGN_M = 2.75
+
+#: THE LENGTH ABOVE WHICH A LEG ENTERED OFF A TURN IS SPLIT, and it is
+#: ARITHMETIC AND NOT A TUNING KNOB. Split at ALIGN_M, the remainder is
+#: (length - ALIGN_M); for that remainder to survive _merge_short it
+#: must be at least PREEMPT_AT_M. So the threshold is exactly the sum,
+#: and a leg shorter than it is left whole - it IS its own alignment
+#: leg, being short enough that its goal is in sight from the turn.
+#:   MEASURED, run 12: the two legs that died were 13.0 m and 20.0 m.
+#: The one that survived the same manoeuvre was 7.0 m, and it is over
+#: this threshold too - the rule does not claim 7 m was safe, only that
+#: the two which were not are covered and that no leg is split into
+#: pieces this file would then throw away.
+SPLIT_ABOVE_M = ALIGN_M + PREEMPT_AT_M
 
 #: HOW STRAIGHT "STRAIGHT ON" IS. The waypoint graph's own turns are all
 #: right angles, and the only non-right angle a route ever carries is
@@ -270,7 +313,7 @@ def controller_for(klass):
     """
     if klass not in CLASS_TREE:
         raise Nav2LegsError(
-            "{!r} is not a leg class. This file knows exactly three, "
+            "{!r} is not a leg class. This file knows exactly four, "
             "nav2.yaml declares two controller plugins and since "
             "AMENDMENTS 4 the table names one of them: {}".format(
                 klass, ", ".join(
@@ -283,7 +326,7 @@ def controller_for(klass):
 #: over at P. It is a tuple and not a bare comparison because the day a
 #: second class earns a stop, the place to say so is here and not
 #: inside an `if`. See runs_to_its_goal() for the measurement.
-DRIVEN_TO_ITS_GOAL = (SPUR_EXIT,)
+DRIVEN_TO_ITS_GOAL = (SPUR_EXIT, ALIGN)
 
 
 def runs_to_its_goal(leg):
@@ -341,6 +384,12 @@ def runs_to_its_goal(leg):
     (1.0 m) get to bring it down. nav2 then reports SUCCEEDED for a
     non-final leg and defect D9's branch starts the next one from a
     standstill - where the direction hold accepts every plan.
+
+    THE ALIGNMENT LEG, and that is DEFECT D12 (run 12, 2026-09-02) -
+    the same sentence one manoeuvre later. An alignment leg exists so
+    that the quarter turn is FINISHED before the long goal is sent; hand
+    it over at P and the long goal arrives with 1.25 m of the turn still
+    to run, which is the state it was added to avoid. See _align_split.
 
     THE COST, STATED: one stop per undock, of about a second, at a
     corner a 3.815 m tricycle with a 1.25 m turning radius was going to
@@ -489,6 +538,97 @@ def split_legs(polyline):
     return _merge_short(legs)
 
 
+def _align_split(chunks):
+    """Long chunks entered off a turn, opened by a short on-ring goal.
+
+    Returns (chunks, indices) - the new chunk list and the set of
+    indices that are ALIGNMENT legs.
+
+    DEFECT D12, MEASURED (run 12, 2026-09-02). D10 already stops the
+    truck at a mouth; run-12 shows that a stop is not an alignment. From
+    a standstill at the S1 mouth on the bay's heading, handed a goal
+    13 m east and a quarter turn round:
+
+        adapter  leg 2/5 transit end=(0.00, 10.00) goal_yaw=-3.142
+                                 truck_yaw=-1.552 turn=-1.589
+        adapter  leg 2/5 transit end=(0.00, 10.00)   (dispatched again)
+        /auto/state BLOCKED "blocked: no progress - best 10.99 m, 30 s
+                             without closing"  at truth (-10.50, 10.41)
+
+    and the same shape at a RING CORNER 110 s later - `leg 3/5 transit
+    end=(-20.00, -10.00) turn=+1.076`, 20 m, BLOCKED at best 20.67 m,
+    truth (-19.09, 11.20). Ground truth for the first: out to
+    (-10.63, 10.92), back to (-10.75, 9.76), twelve seconds of dither
+    round (-10.85, 9.5), west to (-11.52, 9.77), and away on the same
+    arc again.
+      IT IS NOT D11 AND IT IS NOT A CREEP. The worst northward offset
+    over that stretch was +0.927 m against run-10's +2.43 - AMENDMENTS 5
+    took the amplifier out and the excursion with it - and the speeds
+    run 0.02 to 0.30 m/s with no plateau. What is left is the quarter
+    turn D10 named, now OSCILLATING rather than arcing: with nothing
+    holding the mouth-built plan, SmacPlannerHybrid re-decides which
+    sense to drive on every replan, because at a quarter turn both
+    senses reach the goal (FLIP_ABOVE_RAD's own tie) and a goal 13 m
+    away gives neither any advantage the other lacks.
+      SO THE GOAL IS ASKED TO DO ONE THING. A short goal 2.75 m along
+    the leg is reachable one way and awkward the other, so the sense is
+    decided by geometry rather than by the third decimal place of a
+    replan; the truck drives it, STOPS on it (DRIVEN_TO_ITS_GOAL), and
+    the long goal is then sent to a truck already pointing along it -
+    turn about zero, one plan, no cusp.
+
+    WHY "OFF A TURN" AND NOT "OFF A MOUTH". The second BLOCKED was at a
+    ring corner with no bay in sight. Every boundary split_legs makes IS
+    a turn (COLLINEAR_RAD) or a spur foot, so "chunk index >= 1" says
+    "entered off a turn" exactly, in the one place that already knows.
+    The head of a route is left alone: it starts under the TRUCK, whose
+    heading this file is not told at split time, so whether there is a
+    turn there at all is not a question the geometry can answer - and
+    run-12 drove three of those clean.
+
+    WHAT IS NEVER SPLIT: a chunk that is not a TRANSIT. A station spur
+    is 5.75 m and is entered off a right angle, so it matches on shape -
+    but its goal is the BAY's pose and its checker is the 0.25 m one,
+    and an alignment goal inside a spur would put the truck on a heading
+    the bay does not admit (D5). A spur exit is not split for the same
+    reason from the other end.
+    """
+    out, aligned = [], set()
+    for index, points in enumerate(chunks):
+        final = index == len(chunks) - 1
+        head = None
+        if index and classify(points, final) == TRANSIT:
+            head = _align_head(points)
+        if head is None:
+            out.append(list(points))
+            continue
+        aligned.add(len(out))
+        out.append([points[0], head])
+        out.append([head] + list(points[1:]))
+    return out, aligned
+
+
+def _align_head(points):
+    """The alignment goal on this chunk, or None if it earns no split.
+
+    ON THE LEG AND NOT BESIDE IT: the point is ALIGN_M along the chunk's
+    FIRST SEGMENT, so it is a point of the corridor the route already
+    committed to and never a pose this file invented. A first segment
+    shorter than ALIGN_M is left alone rather than walked round the
+    corner - a chunk is near-collinear by construction, so that case is
+    a chunk barely longer than the split itself, and putting the goal
+    past a vertex would put it on a heading that is not this leg's.
+    """
+    if leg_length_m(points) <= SPLIT_ABOVE_M:
+        return None
+    first = math.dist(points[0], points[1])
+    if first < ALIGN_M:
+        return None
+    scale = ALIGN_M / first
+    return (points[0][0] + (points[1][0] - points[0][0]) * scale,
+            points[0][1] + (points[1][1] - points[0][1]) * scale)
+
+
 def classify(leg_points, final):
     """The class of one leg, from the geometry and stations.STATIONS.
 
@@ -531,15 +671,15 @@ def plan_legs(polyline):
     so `polyline[0]` is where the truck is and the spur-exit test has
     something to read.
     """
-    chunks = split_legs(polyline)
+    chunks, aligned = _align_split(split_legs(polyline))
     legs = []
     for index, points in enumerate(chunks):
-        klass = classify(points, final=(index == len(chunks) - 1))
+        final = index == len(chunks) - 1
+        klass = ALIGN if index in aligned else classify(points, final=final)
         controller, tree_key = controller_for(klass)
         legs.append(Leg(points=points, start=points[0], end=points[-1],
                         klass=klass, controller=controller,
-                        tree_key=tree_key,
-                        final=(index == len(chunks) - 1)))
+                        tree_key=tree_key, final=final))
     return legs
 
 
@@ -748,8 +888,11 @@ def _selftest():
            if out[i].tree_key != out[i - 1].tree_key] == [len(out) - 1])
     check("the bay MOUTH is driven to and not handed over - the truck "
           "does not take a quarter turn at 0.3 m/s (D10)",
-          runs_to_its_goal(out[0]) and runs_to_its_goal(out[-1])
-          and not any(runs_to_its_goal(leg) for leg in out[1:-1]))
+          runs_to_its_goal(out[0]) and runs_to_its_goal(out[-1]))
+    check("and neither is an ALIGNMENT leg, while every long ring leg "
+          "still hands over at P (D12)",
+          all(runs_to_its_goal(leg) is (leg.klass == ALIGN)
+              for leg in out[1:-1]))
     check("and nav2 itself objects to exactly one boundary, the bay's",
           [i for i in range(len(out) - 1)
            if not drives_through(out[i], out[i + 1])] == [len(out) - 2])
@@ -771,8 +914,12 @@ def _selftest():
     check("no leg that can be preempted is born already inside P (D9)",
           all(leg_length_m(leg.points) >= PREEMPT_AT_M
               for leg in parked[:-1]))
-    check("S5 -> S9 splits at every junction turn (five legs)",
-          len(out) == 5 and out[-1].klass == STATION_SPUR)
+    check("S5 -> S9 splits at every junction turn, and D12 opens each "
+          "long one with its own alignment leg (eight legs)",
+          len(out) == 8 and out[-1].klass == STATION_SPUR
+          and [leg.klass for leg in out] == [
+              SPUR_EXIT, ALIGN, TRANSIT, ALIGN, TRANSIT, ALIGN, TRANSIT,
+              STATION_SPUR])
 
     straight = plan_legs(route.plan_route((7.0, 12.0), "S5"))
     check("a straight run THROUGH a spur foot still splits there",

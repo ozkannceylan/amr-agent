@@ -427,3 +427,16 @@ allowed to change is `test_m6.py` where it pins the bringup child list
    an alignment split: the first leg off a spur mouth gets a short
    on-ring goal before the long transit — measured between, one change
    at a time.
+
+6. **The station goal aims past the point (G1-C6 ruling, 2026-09-03).**
+   The bay-arrival livelock: nav2's station checker (0.25) and the
+   fleet's arrival radius (0.25) are the same number with zero margin,
+   sampled by two consumers at two instants — nav2 finishes at 0.247,
+   vda's Progress reads >=0.25, the two-fact rule never closes, the
+   route re-issues every ~5 s (14 identical dispatches, run-13). A
+   re-sent goal cannot move a truck already inside the checker; the
+   goal must sit deeper. The STATION leg's goal is the station point
+   advanced ARRIVE_BIAS_M (~0.10 m) along the approach axis, bounded
+   by the bay's own SDF clearance (verified, not assumed); the checker
+   stays 0.25; the truck stops inside the fleet radius and both facts
+   close. The constant carries its geometry argument.

@@ -99,7 +99,7 @@ import sys
 TOOL = "instantiate_truck"
 # Bumped when the transform changes shape, so a manifest written by an
 # older tool is refused rather than trusted.
-TOOL_VERSION = "2"
+TOOL_VERSION = "3"
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _M6V2 = os.path.normpath(os.path.join(_HERE, ".."))
@@ -110,6 +110,7 @@ MANIFEST = "MANIFEST.json"
 sys.path.insert(0, os.path.join(REPO, "m6", "ipc"))
 
 SPEC = "m6_ver2/SPEC_NAMESPACING.md"
+SPEC_ADAPTER = "m6_ver2/SPEC_ADAPTER.md"
 DEC006 = "AMR-DEC-006"
 
 GZ_PREFIX = "/forklift/gz/"
@@ -408,6 +409,199 @@ def unbt_goal_checker(body, checker, name):
                "{}: {} appears {} times".format(name, attr.strip(),
                                                 body.count(attr)))
     return body.replace(attr, "", 1)
+
+
+# --------------------------------------------------------------------
+# Step 5 - the decorator the RPP trees no longer carry.
+#
+# SPEC_ADAPTER.md AMENDMENTS 5 (M6V2-G1-C5). DirectionStablePath is
+# m5v3's own BT node: it latches the driving direction of the plan the
+# controller is tracking and refuses to hand down a REPLAN that flips
+# it while the vehicle is still rolling. It was written as the seat
+# belt on the MPPI legs (AMR-DEC-006) - a sampling controller handed a
+# mid-manoeuvre flip is the reversal failure that decision was about.
+#
+# AMENDMENTS 4 moved every leg class onto RegulatedPurePursuit and left
+# the decorator with nothing to guard. RPP is deterministic and finds
+# its own cusp (findVelocitySignChange in the nav2 1.3.12 plugin), so a
+# flipped plan is a thing it handles rather than a thing it must be
+# protected from; and run-10 measured what the guard did instead -
+# eleven direction-holds defending a plan built at the spur mouth while
+# the truck ran 2.43 m north of the corridor that plan was drawn in.
+# Holding a stale plan against a replan is exactly how a small tracking
+# error becomes a corridor breach.
+#
+# So the derivation LIFTS the wrapper out of the two derived rpp/station
+# trees: the element goes, its children splice up one level, and the
+# ComputePathToPose RecoveryNode becomes the RateController's own child
+# again. THE DONOR IS NOT EDITED (it is m5v3's file and m5v3 still runs
+# MPPI legs behind it), and the derived PRIMARY tree keeps its
+# decorator too: AMENDMENTS 4 leaves MPPI configured with no leg class
+# naming it, and the tree that is not on trial does not get changed by
+# a ruling about the two that are.
+#
+# A DELETION IS COUNTED FOR THE SAME REASON AN INSERTION IS. Neither is
+# visible to a count taken over the donor, so each is counted in the
+# manifest and each is undone by the inverse - which is what keeps the
+# residue pin meaningful over a file this tool made SHORTER.
+# --------------------------------------------------------------------
+
+DSP_TAG = "DirectionStablePath"
+
+#: The wrapper's opening element, donor ports and this truck's odom
+#: topic, asserted BYTE FOR BYTE before it is deleted. The inverse
+#: writes it back from this template, so a donor that retuned a port
+#: would otherwise be restored as a line that was never there - and the
+#: residue pin would fail three steps later, about bytes, instead of
+#: here, about the port that moved.
+DSP_OPEN = ('<DirectionStablePath path="{path}" '
+            'odom_topic="/{vid}/odometry/filtered" hold_speed="0.05" '
+            'hold_all="false" hold_max_s="10.0" consume_floor_m="0.3">')
+DSP_CLOSE = "</" + DSP_TAG + ">"
+
+#: The wrapper's parent, and the seat the inverse finds it by: the
+#: decorator sat between the RateController and its one child, so the
+#: RateController is where it goes back. Unique in all three trees.
+RATE_OPEN = '<RateController hz="1.0">'
+RATE_CLOSE = "</RateController>"
+
+#: The trees' own indent step, and the amount one splice level is worth.
+BT_INDENT = "  "
+
+#: THE HEADER SENTENCE THE STRIP MAKES FALSE, and what it becomes.
+#:
+#: The rpp donor's header does not explain the decorator itself - it
+#: points at the primary's header and says every argument there "holds
+#: here unaltered". After the strip one of them does not, and a derived
+#: file that advertises a guard it no longer carries is exactly the
+#: drift this tool's own header refuses ("inertness is not a licence to
+#: drift"). An operator who greps DirectionStablePath on a rig has to
+#: land on the truth. Two donor lines out, twelve derived lines in,
+#: counted, and the inverse puts the two back.
+DSP_NOTE_DONOR = (
+    "budget is where it is, what DirectionStablePath does and why it wraps",
+    "what it wraps - holds here unaltered and is not repeated.",
+)
+DSP_NOTE_DERIVED = (
+    "budget is where it is - holds here unaltered and is not repeated.",
+    "",
+    "ONE OF THOSE ARGUMENTS DOES NOT HOLD HERE. The primary's header",
+    "explains what DirectionStablePath does and why it wraps what it",
+    "wraps; THIS TREE NO LONGER CARRIES IT. m6_ver2's derivation lifts",
+    "the wrapper out and splices its children up one level - the guard",
+    "was the seat belt on the MPPI legs, every leg class here drives",
+    "RegulatedPurePursuit, which finds its own cusp, and run-10 measured",
+    "the guard holding a stale mouth-built plan across a 2.43 m corridor",
+    "breach. See m6_ver2/tools/instantiate_truck.py Step 5 and",
+    "SPEC_ADAPTER.md AMENDMENTS 5. The donor still has it, the donor is",
+    "never edited: read it there and not here.",
+)
+
+
+def _lead(row):
+    return row[:len(row) - len(row.lstrip())]
+
+
+def _carriage(row):
+    """LF or CRLF, taken from a line that is already in the file."""
+    return "\r" if row.endswith("\r") else ""
+
+
+def _swap_note(rows, out_of, into, name):
+    """Replace one contiguous run of comment lines with another.
+
+    Matched and written on the ROWS and not on the bytes: the derived
+    set is mixed CRLF and LF, and a two-line literal joined by a bare
+    newline would match one half of it and silently miss the other.
+    """
+    want = list(out_of)
+    hits = [index for index in range(len(rows) - len(want) + 1)
+            if [row.strip() for row in rows[index:index + len(want)]] == want]
+    if len(hits) != 1:
+        refuse("the header sentence the strip rewrites is in the tree once",
+               "{} AMENDMENTS 5".format(SPEC_ADAPTER),
+               "{}: found {} of it.".format(name, len(hits)),
+               "The sentence claims the decorator's argument holds in this",
+               "file. The strip makes that false, so which copy to correct",
+               "is not left to a best guess.")
+    at = hits[0]
+    indent = _lead(rows[at])
+    eol = _carriage(rows[at])
+    written = [(indent + line + eol) if line else eol for line in into]
+    return rows[:at] + written + rows[at + len(want):]
+
+
+def _sole_line(rows, want, what, name):
+    """The one line whose content is `want`, or a refusal that says so."""
+    hits = [index for index, row in enumerate(rows) if row.strip() == want]
+    if len(hits) != 1:
+        refuse("{} appears exactly once".format(what),
+               "{} AMENDMENTS 5".format(SPEC_ADAPTER),
+               "{}: found {} of them.".format(name, len(hits)),
+               "This step deletes an element and the inverse puts it",
+               "back in one seat, so two seats is a question neither",
+               "of them may answer by document order.")
+    return hits[0]
+
+
+def bt_strip_decorator(body, vid, name):
+    """Delete the DirectionStablePath wrapper; splice its children up."""
+    rows = body.split("\n")
+    top = _sole_line(rows, DSP_OPEN.replace("{vid}", vid),
+                     "the decorator's opening element", name)
+    bottom = _sole_line(rows, DSP_CLOSE,
+                        "the decorator's closing element", name)
+    if bottom <= top + 1:
+        refuse("the decorator wraps at least one node",
+               "{} AMENDMENTS 5".format(SPEC_ADAPTER),
+               "{}: it closes on line {} and opens on line {}"
+               .format(name, bottom + 1, top + 1))
+    inside = _lead(rows[top]) + BT_INDENT
+    if _lead(rows[bottom]) != _lead(rows[top]):
+        refuse("the decorator's two tags are indented alike",
+               "{} AMENDMENTS 5".format(SPEC_ADAPTER),
+               "{}: {!r} opens it and {!r} closes it"
+               .format(name, _lead(rows[top]), _lead(rows[bottom])))
+    lifted = []
+    for row in rows[top + 1:bottom]:
+        if row.strip() and not row.startswith(inside):
+            refuse("every line inside the decorator is indented under it",
+                   "{} AMENDMENTS 5".format(SPEC_ADAPTER),
+                   "{}: {!r} is not".format(name, row[:60]))
+        lifted.append(row[len(BT_INDENT):] if row.strip() else row)
+    rows = _swap_note(rows[:top] + lifted + rows[bottom + 1:],
+                      DSP_NOTE_DONOR, DSP_NOTE_DERIVED, name)
+    return "\n".join(rows), {
+        "bt_strip_decorator": 1,
+        "bt_strip_note_lines": len(DSP_NOTE_DERIVED) - len(DSP_NOTE_DONOR),
+    }
+
+
+def unbt_strip_decorator(body, vid, name):
+    """Put the wrapper back around the RateController's one child."""
+    if "<" + DSP_TAG in body:
+        refuse("the derived tree carries no decorator to restore",
+               "{} AMENDMENTS 5".format(SPEC_ADAPTER),
+               "{} still holds a <{}> element, so the strip did not run "
+               "or the donor has moved under this tool."
+               .format(name, DSP_TAG))
+    rows = _swap_note(body.split("\n"), DSP_NOTE_DERIVED, DSP_NOTE_DONOR,
+                      name)
+    top = _sole_line(rows, RATE_OPEN, "the decorator's parent", name)
+    bottom = _sole_line(rows, RATE_CLOSE, "the decorator's parent's end",
+                        name)
+    if bottom <= top + 1:
+        refuse("the decorator's parent wraps at least one node",
+               "{} AMENDMENTS 5".format(SPEC_ADAPTER),
+               "{}: {} closes on line {}".format(name, RATE_CLOSE,
+                                                 bottom + 1))
+    inside = _lead(rows[top]) + BT_INDENT
+    eol = _carriage(rows[top])
+    pushed = [BT_INDENT + row if row.strip() else row
+              for row in rows[top + 1:bottom]]
+    restored = ([inside + DSP_OPEN.replace("{vid}", vid) + eol]
+                + pushed + [inside + DSP_CLOSE + eol])
+    return "\n".join(rows[:top + 1] + restored + rows[bottom:])
 
 
 def locate(index_of, dotted, name):
@@ -744,10 +938,10 @@ class Source(object):
     """
 
     __slots__ = ("src", "name", "rules", "wrap", "sdf_frames", "kept",
-                 "goal_checker")
+                 "goal_checker", "strip_decorator")
 
     def __init__(self, src, name, rules=(), wrap=False, sdf_frames=False,
-                 kept=(), goal_checker=None):
+                 kept=(), goal_checker=None, strip_decorator=False):
         self.src = src
         self.name = name
         self.rules = list(rules)
@@ -756,6 +950,9 @@ class Source(object):
         self.kept = list(kept)
         # A behaviour tree: which goal checker its FollowPath names.
         self.goal_checker = goal_checker
+        # A behaviour tree whose DirectionStablePath wrapper comes out
+        # (Step 5). False on the primary tree, which keeps it.
+        self.strip_decorator = strip_decorator
 
 
 SOURCES = [
@@ -783,14 +980,20 @@ SOURCES = [
     # checker instead, and it is the only file here derived twice from
     # one source. Its whole difference from the second is that one
     # attribute - the residue pin inverts both back to the same bytes.
+    #
+    # THE TWO RPP TREES ALSO LOSE THE DirectionStablePath WRAPPER
+    # (Step 5, SPEC_ADAPTER.md AMENDMENTS 5). The primary keeps it: it
+    # is the MPPI tree, no leg class names it, and a ruling about the
+    # legs that drive is not a licence to change the one that does not.
     Source("m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3.xml",
            "navigate_to_pose_tricycle_v3.xml",
            goal_checker=GENERAL_CHECKER),
     Source("m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3_rpp.xml",
            "navigate_to_pose_tricycle_v3_rpp.xml",
-           goal_checker=GENERAL_CHECKER),
+           goal_checker=GENERAL_CHECKER, strip_decorator=True),
     Source("m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3_rpp.xml",
-           STATION_TREE, goal_checker=STATION_CHECKER),
+           STATION_TREE, goal_checker=STATION_CHECKER,
+           strip_decorator=True),
 ]
 
 _BY_NAME = dict((source.name, source) for source in SOURCES)
@@ -986,6 +1189,9 @@ def derive_text(src, vid, body=None, spawn=None):
     if src.goal_checker:
         out, more = bt_goal_checker(out, src.goal_checker, src.name)
         counts.update(more)
+    if src.strip_decorator:
+        out, more = bt_strip_decorator(out, vid, src.name)
+        counts.update(more)
     rewritten = asserted = 0
     index_of = key_lines(out) if src.rules else {}
     for rule in src.rules:
@@ -1053,6 +1259,8 @@ def invert_text(src, body, vid, origins):
         if rule.inserts:
             out = remove_block(out, rule.new_lines(vid), rule.dotted,
                                src.name)
+    if src.strip_decorator:
+        out = unbt_strip_decorator(out, vid, src.name)
     if src.goal_checker:
         out = unbt_goal_checker(out, src.goal_checker, src.name)
     index_of = key_lines(out) if src.rules else {}
@@ -1192,6 +1400,7 @@ def main():
                     + entry["counts"]["keyed_rewritten"]
                     + entry["counts"]["keyed_inserted"]
                     + entry["counts"].get("bt_goal_checker", 0)
+                    + entry["counts"].get("bt_strip_decorator", 0)
                     for entry in manifest["sources"].values())
         print("{}: {} <- {} files, {} literals, spawn {} {} yaw {}"
               .format(TOOL, os.path.join("m6_ver2", "vehicles", vid),

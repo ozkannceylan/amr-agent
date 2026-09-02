@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 
 import pytest
 import yaml
@@ -57,6 +58,13 @@ from status_contract import VEHICLES                       # noqa: E402
 #                  goal checkers declared, nav2_controller will not fall
 #                  back to "the only plugin loaded" and an unnamed
 #                  checker aborts every FollowPath.
+#   bt_strip_decorator / bt_strip_note_lines
+#                - the one ELEMENT the two rpp trees lose, and the net
+#                  lines the header note that replaces its sentence
+#                  adds. Like an insertion, a deletion is invisible to a
+#                  count taken over the donor, so both are counted here
+#                  and the residue pin puts both back (SPEC_ADAPTER.md
+#                  AMENDMENTS 5).
 #   lines        - donor line count, which the wrap check is built on
 # ----------------------------------------------------------------------
 EXPECTED = {
@@ -149,6 +157,14 @@ EXPECTED = {
         "forklift_gz": 0, "m5v3": 1, "agv_forklift_kept": 0,
         "keyed_rewritten": 0, "keyed_asserted": 0,
         "keyed_inserted": 0, "inserted_lines": 0, "bt_goal_checker": 1,
+        # M6V2-G1-C5: the DirectionStablePath wrapper comes OUT of the
+        # two rpp trees and its children splice up one level, and the
+        # header sentence that said the primary's decorator argument
+        # "holds here unaltered" is rewritten to say it no longer does.
+        # `lines` below is still the DONOR's; the derived file is two
+        # lines shorter for the element and ten longer for the note, and
+        # that arithmetic is asserted where the strip is tested.
+        "bt_strip_decorator": 1, "bt_strip_note_lines": 10,
         "lines": 111, "wrapped": False,
     },
     # THE THIRD TREE, DERIVED FROM THE SECOND ONE'S DONOR. Every count
@@ -160,6 +176,7 @@ EXPECTED = {
         "forklift_gz": 0, "m5v3": 1, "agv_forklift_kept": 0,
         "keyed_rewritten": 0, "keyed_asserted": 0,
         "keyed_inserted": 0, "inserted_lines": 0, "bt_goal_checker": 1,
+        "bt_strip_decorator": 1, "bt_strip_note_lines": 10,
         "lines": 111, "wrapped": False,
     },
 }
@@ -859,3 +876,248 @@ def test_the_rpp_block_no_longer_claims_one_box_for_both_controllers(built):
         block = body[body.index(note):body.index(claim)]
         assert "0.25 m box" in block
         assert "getTolerances" in block
+
+
+# ----------------------------------------------------------------------
+# THE DECORATOR THE RPP TREES NO LONGER CARRY - M6V2-G1-C5
+#
+# SPEC_ADAPTER.md AMENDMENTS 5. DirectionStablePath was written as the
+# seat belt on the MPPI legs (AMR-DEC-006): it holds a plan's driving
+# direction while the vehicle is still moving, so a sampling controller
+# cannot be handed a flip mid-manoeuvre. AMENDMENTS 4 moved every leg
+# class onto RPP and left the decorator with nothing to guard - a
+# deterministic tracker finds its own cusp (findVelocitySignChange) and
+# does not need a plan held for it. Run-10 measured what was left of it:
+# eleven direction-holds defending a plan built at the spur mouth while
+# the truck drifted 2.43 m north of the corridor it was planned in.
+#
+# So the derivation STRIPS the wrapper element from the two derived
+# rpp/station trees and splices its children up one level. The donor
+# trees keep it - they are never edited - and so does the derived
+# PRIMARY tree, which is the unnamed MPPI tree AMENDMENTS 4 left
+# configured: the day a leg class names MPPI again, its seat belt is
+# still buckled.
+# ----------------------------------------------------------------------
+
+STRIPPED_TREES = ("navigate_to_pose_tricycle_v3_rpp.xml", itk.STATION_TREE)
+DECORATED_TREE = "navigate_to_pose_tricycle_v3.xml"
+
+_PLANNER_NODE = ('            <RecoveryNode number_of_retries="1" '
+                 'name="ComputePathToPose">')
+
+
+def _trees():
+    """The three behaviour trees, which are the sources with a checker."""
+    return [source for source in itk.SOURCES if source.goal_checker]
+
+
+def _bt_root(body):
+    """The tree's ELEMENT, parsed, without its licence-block header.
+
+    The headers carry rules of thumb spelled `---- LIKE THIS ----`, and
+    `--` inside a comment is not well-formed XML. tinyxml2 - what
+    BT.CPP 4 parses these with - scans a comment for its closing `-->`
+    and never looks, so bt_navigator loads them; a strict parser will
+    not. So the assertions below are made about the ELEMENT TREE, from
+    `<root` on, which is the part BT.CPP actually interprets.
+    """
+    return ET.fromstring(body[body.index("<root "):])
+
+
+def _tag_counts(body):
+    counts = {}
+    for element in _bt_root(body).iter():
+        counts[element.tag] = counts.get(element.tag, 0) + 1
+    return counts
+
+
+def _donor_body(name):
+    return itk.read_text(os.path.join(itk.REPO, itk.source(name).src))
+
+
+def test_every_donor_tree_wraps_its_planner_in_the_decorator():
+    """The state this task changed, measured on the donor.
+
+    All three donors are one file's shape: the ComputePathToPose
+    RecoveryNode inside DirectionStablePath inside the RateController.
+    Every claim below is about a departure from that on TWO of the
+    three, so the starting point is measured and not assumed.
+    """
+    trees = _trees()
+    assert sorted(source.name for source in trees) == sorted(
+        (DECORATED_TREE,) + STRIPPED_TREES)
+    for source in trees:
+        donor = _donor(source)
+        assert donor.count("<DirectionStablePath ") == 1, source.name
+        assert donor.count("</DirectionStablePath>") == 1, source.name
+        assert donor.count(itk.RATE_OPEN) == 1, source.name
+
+
+def test_the_derived_rpp_trees_carry_no_decorator(built):
+    """The ELEMENT is gone and the header says so in the same breath.
+
+    The tree still NAMES DirectionStablePath, once, in the note the
+    strip writes - which is the point of the note. An operator greps the
+    node name on a rig; what they must not find is a file that carries
+    the primary's argument for a guard this file no longer has.
+    """
+    root, _ = built
+    for vid in VIDS:
+        for name in STRIPPED_TREES:
+            body = _derived(root, vid, itk.source(name))
+            assert "<" + itk.DSP_TAG not in body, (vid, name)
+            assert itk.DSP_CLOSE not in body, (vid, name)
+            assert body.count(itk.DSP_TAG) == 1, (vid, name)
+            assert "THIS TREE NO LONGER CARRIES IT" in body, (vid, name)
+            for line in itk.DSP_NOTE_DONOR:
+                assert line not in body, (vid, name, line)
+
+
+def test_the_primary_derived_tree_keeps_the_decorator(built):
+    """The unnamed MPPI tree is not touched, and that is the ruling.
+
+    AMENDMENTS 4 leaves MPPI configured with no leg class naming it.
+    Stripping its guard as well would make the tree that is not on trial
+    quietly different from the one whose evidence was taken.
+    """
+    root, _ = built
+    for vid in VIDS:
+        body = _derived(root, vid, itk.source(DECORATED_TREE))
+        assert body.count("<DirectionStablePath ") == 1, vid
+        assert body.count("</DirectionStablePath>") == 1, vid
+        assert 'odom_topic="/{}/odometry/filtered"'.format(vid) in body, vid
+
+
+def test_the_strip_removes_the_wrapper_and_no_other_node(built):
+    """Same node set minus the decorator, and both trees still parse.
+
+    A tree bt_navigator cannot parse is a truck that never leaves its
+    bay, so the assertion is made by an XML parser and not a grep.
+    """
+    root, _ = built
+    for vid in VIDS:
+        for name in STRIPPED_TREES:
+            source = itk.source(name)
+            want = _tag_counts(_donor(source))
+            assert want.pop(itk.DSP_TAG) == 1, name
+            got = _tag_counts(_derived(root, vid, source))
+            assert got == want, (vid, name)
+
+
+def test_the_planner_recovery_is_now_the_rate_controllers_own_child(built):
+    """The children spliced UP one level - they did not move sideways."""
+    root, _ = built
+    for vid in VIDS:
+        for name in STRIPPED_TREES:
+            tree = _bt_root(_derived(root, vid, itk.source(name)))
+            rate = [el for el in tree.iter() if el.tag == "RateController"]
+            assert len(rate) == 1, (vid, name)
+            kids = list(rate[0])
+            assert len(kids) == 1, (vid, name)
+            assert kids[0].tag == "RecoveryNode", (vid, name)
+            assert kids[0].get("name") == "ComputePathToPose", (vid, name)
+
+
+def test_the_strips_line_arithmetic_is_the_tables_own(built):
+    """Two lines out for the element, ten in for the note.
+
+    And the planner's RecoveryNode is spelled at TWELVE spaces, which is
+    the RateController's indent plus one step: the children came up a
+    level, they did not merely lose their wrapper's tags.
+    """
+    root, _ = built
+    for vid in VIDS:
+        for name in STRIPPED_TREES:
+            source = itk.source(name)
+            want = EXPECTED[name]
+            donor = _donor(source).split("\n")
+            body = _derived(root, vid, source).split("\n")
+            assert len(donor) == want["lines"], name
+            assert len(body) == (want["lines"] - 2
+                                 + want["bt_strip_note_lines"]), (vid, name)
+            assert _PLANNER_NODE in body, (vid, name)
+            assert itk.RATE_OPEN in [row.strip() for row in body], (vid, name)
+
+
+def test_the_stripped_trees_still_name_their_goal_checker(built):
+    """The strip must not cost the station leg its 0.25 m box."""
+    root, _ = built
+    for vid in VIDS:
+        for name in STRIPPED_TREES:
+            source = itk.source(name)
+            body = _derived(root, vid, source)
+            follow = [el for el in _bt_root(body).iter()
+                      if el.tag == "FollowPath"]
+            assert len(follow) == 1, (vid, name)
+            assert follow[0].get("goal_checker_id") == source.goal_checker
+        station = _derived(root, vid, itk.source(itk.STATION_TREE))
+        assert 'goal_checker_id="station_goal_checker"' in station, vid
+
+
+def test_the_strip_carries_away_the_one_literal_the_blanket_moved(built):
+    """The decorator's odom_topic was the rpp trees' ONLY /m5v3/.
+
+    nav2.yaml's gz_survivors, again: the blanket count is what the
+    rewrite MOVED and the manifest keeps it; a later step may then
+    delete the line the literal lives on. The rpp rows read m5v3 1 in
+    the manifest and hold zero /<vid>/ on disk, and both numbers are
+    true about different moments.
+    """
+    root, _ = built
+    for vid in VIDS:
+        for name in STRIPPED_TREES:
+            body = _derived(root, vid, itk.source(name))
+            assert body.count("/{}/".format(vid)) == 0, (vid, name)
+        primary = _derived(root, vid, itk.source(DECORATED_TREE))
+        assert primary.count("/{}/".format(vid)) == 2, vid
+
+
+def test_the_strip_refuses_a_decorator_it_was_not_written_against():
+    """The donor's ports are asserted, because the inverse rewrites them.
+
+    unbt_strip_decorator puts the opening element back from a template.
+    If the donor ever retunes hold_max_s the template would put back a
+    line that was never there, the residue pin would fail somewhere
+    downstream, and the message would be about bytes rather than about
+    the port that moved. It is refused here instead, by name.
+    """
+    body = _donor_body("navigate_to_pose_tricycle_v3_rpp.xml").replace(
+        "/m5v3/", "/f1/")
+    moved = body.replace('hold_max_s="10.0"', 'hold_max_s="12.0"')
+    assert moved != body
+    with pytest.raises(SystemExit):
+        itk.bt_strip_decorator(moved, "f1", "t")
+
+
+def test_the_inverse_refuses_a_tree_that_still_carries_the_decorator():
+    """Restore is only safe when there is nothing there to restore."""
+    body = _donor_body("navigate_to_pose_tricycle_v3_rpp.xml").replace(
+        "/m5v3/", "/f1/")
+    with pytest.raises(SystemExit):
+        itk.unbt_strip_decorator(body, "f1", "t")
+
+
+def test_the_inverse_refuses_a_second_seat_for_the_decorator():
+    """The inverse finds the wrapper's seat by its PARENT, so the parent
+    has to be unique: two RateControllers would be two answers to where
+    the element goes back, and the residue pin would be deciding it by
+    document order."""
+    body = _donor_body("navigate_to_pose_tricycle_v3_rpp.xml").replace(
+        "/m5v3/", "/f1/")
+    stripped, _ = itk.bt_strip_decorator(body, "f1", "t")
+    twice = stripped.replace(itk.RATE_OPEN,
+                             itk.RATE_OPEN + "\n          " + itk.RATE_OPEN,
+                             1)
+    with pytest.raises(SystemExit):
+        itk.unbt_strip_decorator(twice, "f1", "t")
+
+
+def test_the_strip_and_its_inverse_are_the_identity_on_a_tree():
+    """The residue pin in miniature, on the step alone."""
+    for name in STRIPPED_TREES:
+        for vid in VIDS:
+            body = _donor_body(name).replace("/m5v3/", "/{}/".format(vid))
+            stripped, counts = itk.bt_strip_decorator(body, vid, name)
+            assert counts == {"bt_strip_decorator": 1,
+                              "bt_strip_note_lines": 10}
+            assert itk.unbt_strip_decorator(stripped, vid, name) == body
