@@ -463,3 +463,18 @@ allowed to change is `test_m6.py` where it pins the bringup child list
    SUCCEEDED landing outside the adapter's radius (D6's class), not a
    change in where the truck comes to rest. Moving the stopping point
    is a Decision 3 question and it is NOT ruled on here.
+
+8. **The alignment leg hands over in motion (G1-C7 ruling, 2026-09-03).**
+   Run-15 measured D12 driven but not effective: ALIGN's checker is
+   position-only with the 0.60 m box, the truck stopped 0.53 m off at
+   0.90 rad skew mid-arc (ALIGN_M 2.75 is SHORTER than the quarter-turn
+   arc itself, ~1.96 m at r=1.25), and Smac exhausted iterations
+   planning 4.3 m from that pose (10 refusals over free paint) - two
+   standing-still BLOCKEDs of four. The fix is geometric, not a
+   checker: ALIGN_M grows to arc + straighten (quarter arc 1.96 m +
+   one wheelbase-class straightening length, ~4.5 m total, the
+   arithmetic in the constant), and ALIGN leaves DRIVEN_TO_ITS_GOAL -
+   it preempts at P like any transit, so the long leg is dispatched
+   from a moving, on-axis pose and no off-heading standing start is
+   ever handed to the planner. SPUR_EXIT keeps its stop (D10).
+   SPLIT_ABOVE_M follows the new sum.
