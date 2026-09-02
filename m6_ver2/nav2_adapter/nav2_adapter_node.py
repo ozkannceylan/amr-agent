@@ -311,6 +311,13 @@ class Adapter(object):
         self.motor = False
         self.v_limit = None
         self.status_rx = None
+        #: THE LAST STEER ANGLE THIS NODE PUT ON THE WIRE, which is what
+        #: nav2_cmd's `angular_z is None` means: "HOLD THE STEER AXIS".
+        #: It starts at 0.0 because that is where the world spawns the
+        #: axis - the adapter has no steer feedback and must not invent
+        #: one - and every message published below sets it, so it is
+        #: never a guess about anything except the boot instant.
+        self.held_steer_rad = 0.0
 
         # ---- the leg queue and the goal generation ----
         self.legs = []
@@ -323,6 +330,13 @@ class Adapter(object):
         #: as a failure it would latch BLOCKED on a truck that is
         #: driving perfectly (SPEC_ADAPTER.md Decision 2).
         self.generation = 0
+        #: A LEG HELD BACK UNTIL THE SERVER IS IDLE AGAIN, and it exists
+        #: because nav2 has TWO doors and this file has to pick the
+        #: right one. See _advance_to(): a preemption that changes the
+        #: behaviour tree is REFUSED by bt_navigator, so a leg whose
+        #: class differs from the one in flight waits for the cancelled
+        #: goal's result instead of racing it.
+        self.pending_leg = None
         self.ticks = 0
         self.pubs = {}
         self.action = None
@@ -480,9 +494,14 @@ class Adapter(object):
             return
         leg = self.legs[self.leg_i]
         distance = math.dist(world[:2], leg.end)
-        if nav2_legs.should_preempt(distance, leg.final) \
+        # A LEG ALREADY WAITING IS NOT PREEMPTED AGAIN. The distance is
+        # still inside P for every tick of the cancel window, and a
+        # second cancel would bump the generation the pending send is
+        # waiting on.
+        if self.pending_leg is None \
+                and nav2_legs.should_preempt(distance, leg.final) \
                 and self.leg_i + 1 < len(self.legs):
-            self._send_leg(self.leg_i + 1)
+            self._advance_to(self.leg_i + 1)
             return
         if self.watch is not None:
             stalled = self.watch.step(now, distance)
@@ -523,6 +542,57 @@ class Adapter(object):
                     return
         self._send_leg(0)
 
+    def _advance_to(self, index):
+        """Leg `index` starts - through whichever of nav2's two doors
+        this transition is allowed to use.
+
+        NAV2 REFUSES A PREEMPTION THAT CHANGES THE BEHAVIOUR TREE, and
+        it says so in one line (nav2 1.3.12, measured live 2026-09-02):
+
+          "Preemption request was rejected since the requested BT XML
+           file is not the same as the one that the current goal is
+           executing. Preemption with a new BT is invalid since it would
+           require cancellation of the previous goal instead of true
+           preemption. Cancel the current goal and send a new action
+           request if you want to use a different BT XML file. For now,
+           continuing to track the last goal until completion."
+
+        The NEW goal is then aborted with an empty result (error_code
+        0), the OLD goal keeps running, and the adapter - correctly by
+        its own rules - reads that abort as a nav2 failure and latches
+        BLOCKED. SPEC_ADAPTER.md Decision 2 asks for BOTH rolling
+        preemption AND a per-leg-class tree, and those two meet at the
+        transit -> station-spur boundary, which is the last leg of EVERY
+        route: the order died there, 1.49 m from the spur foot, on the
+        first run that got this far.
+
+        So the tree decides the door. Same tree: true preemption, which
+        is what P = 1.5 m was measured for and what keeps the truck
+        moving. Different tree: nav2's own instruction, in its own
+        order - cancel, and send when the server reports the old goal
+        finished (_on_result), never on a timer. The truck decelerates
+        into the spur foot, which is where a tricycle turning into a
+        4.00 m bay off the ring band was going to slow down anyway.
+        """
+        if self.handle is None \
+                or self.legs[index].tree_key == self.legs[self.leg_i].tree_key:
+            self._send_leg(index)
+            return
+        self.pending_leg = index
+        handle, self.handle = self.handle, None
+        # THE WATCH IS LEFT RUNNING ON PURPOSE. It is measuring the
+        # distance to the leg end the truck is still approaching, so it
+        # stays the backstop if the cancelled goal's result never
+        # arrives at all - which would otherwise be a silent stop.
+        self.generation += 1
+        handle.cancel_goal_async()
+
+    def _send_pending(self):
+        """The held leg, now that nav2 has finished with the last one."""
+        index, self.pending_leg = self.pending_leg, None
+        if index is not None:
+            self._send_leg(index)
+
     def _send_leg(self, index):
         """One NavigateToPose goal, with a generation on it."""
         if not self.legs:
@@ -560,6 +630,12 @@ class Adapter(object):
     def _on_result(self, done, generation):
         """A preempted leg's ABORTED is not a failure. See `generation`."""
         if generation != self.generation:
+            # THE OLD GOAL IS OFF THE SERVER, which is the one fact
+            # _advance_to's cancel branch is waiting for. Displaced,
+            # cancelled or aborted makes no difference here: what the
+            # next goal needs is an idle bt_navigator, and this message
+            # IS nav2 saying so.
+            self._send_pending()
             return
         self.handle = None
         result = done.result()
@@ -588,6 +664,11 @@ class Adapter(object):
     def _abandon_goal(self):
         """Cancel whatever is running. The ROUTE is not touched here."""
         self.watch = None
+        # AND THE LEG THAT WAS WAITING TO GO OUT. A cancel, a refusal or
+        # a SAFETY-STOP that left a pending leg behind would send it the
+        # moment the cancelled goal's result landed - a goal nobody
+        # asked for, after the door that asked for it had closed.
+        self.pending_leg = None
         handle, self.handle = self.handle, None
         self.generation += 1
         if handle is not None:
@@ -607,6 +688,19 @@ class Adapter(object):
         cmd_gate's staleness rule is the reason the stream never stops:
         silence is a demand, and a stopped publisher is a different
         message from a zero.
+
+        AND EVERY FIELD THAT GOES OUT IS A float. `angular_z` is None
+        whenever the answer is "HOLD THE STEER AXIS" - nav2_cmd's own
+        note says so, and says the shell republishes the last angle it
+        sent. The donor's shell holds that axis by NOT PUBLISHING its
+        steer terminal, which a plant with two Float64 terminals can do;
+        this wire carries traction and steer in ONE Twist and a stopped
+        stream is cmd_gate's staleness demand, so the hold has to be
+        spelled as a number. Measured live 2026-09-02: assigning the
+        None straight through aborts the process inside rosidl
+        (`geometry_msgs__msg__vector3__convert_from_py`, PyFloat_Check),
+        on the first sub-creep twist of the first leg - which is every
+        standing start.
         """
         message = self.msgs.twist()
         if self.state.state == nav2_state.EN_ROUTE \
@@ -616,10 +710,21 @@ class Adapter(object):
                 self.smoothed[0], self.smoothed[1], self.limits,
                 None if self.v_limit is None
                 else nav2_cmd.limit_mps_from_v_limit(self.v_limit))
-            message.linear.x = command.linear_x
-            message.angular.z = command.angular_z
+            message.linear.x = float(command.linear_x)
+            # ZERO WOULD CENTRE THE WHEEL, which is a motion nobody
+            # commanded and, at a stop inside a station spur, a motion
+            # into the rack.
+            if command.angular_z is not None:
+                self.held_steer_rad = float(command.angular_z)
+            message.angular.z = self.held_steer_rad
             self.state.reversing = command.reversing
         else:
+            # THE ZEROS ARE A COMMAND TOO. Outside EN-ROUTE the contract
+            # is zeros on both fields (SPEC_ADAPTER.md Decision 3), so
+            # the axis IS being told to centre and the held angle is
+            # that: this attribute is always the last angle sent, never
+            # the last angle wanted.
+            self.held_steer_rad = 0.0
             self.state.reversing = False
         self.pubs["cmd"].publish(message)
 

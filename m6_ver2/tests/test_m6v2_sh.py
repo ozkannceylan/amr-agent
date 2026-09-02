@@ -124,7 +124,7 @@ def test_every_truck_verb_goes_through_truck_sh(source, verb):
 
 
 def test_truck_sh_is_the_only_path_and_is_refused_when_missing(source):
-    assert 'TRUCK="$M6V2/truck.sh"' in source
+    assert 'TRUCK="$M6V2_DIR/truck.sh"' in source
     assert "the per-truck runner exists" in source
 
 
@@ -151,7 +151,7 @@ def test_the_world_is_started_with_the_truck_subset_in_the_environment(source):
     folded = fold(source)
     assert ('spawn world - M6V2_VIDS="${VIDS[*]}" '
             'ros2 launch "$WORLD_LAUNCH" "gui:=$GUI"') in folded
-    assert 'WORLD_LAUNCH="$M6V2/world.launch.py"' in source
+    assert 'WORLD_LAUNCH="$M6V2_DIR/world.launch.py"' in source
     # It rides the `env` the spawn execs - the broker's loader path does
     # the same - so it reaches the child and not the whole cell.
     assert "export M6V2_VIDS" not in source
@@ -262,7 +262,7 @@ def test_the_renderer_gate_refuses_and_reads_its_numbers_from_the_config(
 
 def test_the_derivation_freshness_gate_runs_the_tools_own_check(source):
     assert 'python3 "$DERIVE" --vid "$vid" --check' in source
-    assert 'DERIVE="$M6V2/tools/instantiate_truck.py"' in source
+    assert 'DERIVE="$M6V2_DIR/tools/instantiate_truck.py"' in source
 
 
 def test_the_fleet_config_is_derived_and_firewalled_in_one_step(source):
@@ -276,7 +276,7 @@ def test_the_fleet_config_is_derived_and_firewalled_in_one_step(source):
     correct one - so the tool that makes it is the tool that firewalls
     it, and start() runs that one.
     """
-    assert 'FIREWALL="$M6V2/tools/fleet_odom_firewall.py"' in source
+    assert 'FIREWALL="$M6V2_DIR/tools/fleet_odom_firewall.py"' in source
     assert 'python3 "$FIREWALL" --vid "$vid"' in source
     # and the OLD shape is gone: existence alone is not the gate any
     # more, because a file that exists can be the unfirewalled one.
@@ -305,9 +305,9 @@ def test_a_plain_m6_cell_is_detected_by_environment_and_not_by_name(source):
 # the ledger, the logs and the CLI
 # ----------------------------------------------------------------------
 def test_the_ledger_and_the_logs_live_under_m6_ver2(source):
-    assert 'PIDFILE="$M6V2/.m6v2_pids"' in source
-    assert 'LOGDIR="$M6V2/logs"' in source
-    assert 'VIDFILE="$M6V2/.m6v2_vids"' in source
+    assert 'PIDFILE="$M6V2_DIR/.m6v2_pids"' in source
+    assert 'LOGDIR="$M6V2_DIR/logs"' in source
+    assert 'VIDFILE="$M6V2_DIR/.m6v2_vids"' in source
 
 
 def test_the_logs_directory_is_gitignored():
@@ -359,3 +359,64 @@ def test_bash_n_is_clean():
     done = subprocess.run([bash, "-n", _M6V2_SH],
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     assert done.returncode == 0, done.stdout.decode("utf-8", "replace")
+
+
+# ----------------------------------------------------------------------
+# the marker is a scalar and the module path is a path, and the export
+# order is what made that matter (live regression, 2026-09-02)
+# ----------------------------------------------------------------------
+#: The one path in this script that is expanded when a FUNCTION RUNS
+#: rather than when the file is read. Every other `$VAR/...` above is
+#: resolved in the prelude, before the marker export can reach it, which
+#: is exactly why the bug this pins was invisible until a truck was
+#: started: `export M6V2=1` overwrote `M6V2="$REPO/m6_ver2"`, and
+#: derived_get went looking in `1/vehicles/f1/config.yaml`.
+_DERIVED_GET_PATH = re.compile(
+    r'print\(node\)\'\s+"\$\{?(\w+)\}?/vehicles/\$1/config\.yaml"')
+
+
+def test_derived_get_reads_a_path_and_not_the_cell_marker(source):
+    found = _DERIVED_GET_PATH.search(fold(source))
+    assert found, "derived_get no longer names <var>/vehicles/$1/config.yaml"
+    var = found.group(1)
+    exported = set(re.findall(r"(?m)^export (\w+)=", source))
+    assert var not in exported, (
+        "derived_get expands ${} at CALL time and this script exports the "
+        "same name as a scalar - the export wins and every derived value "
+        "reads as empty".format(var))
+
+
+#: Source the script, let its usage branch exit, and print the wanted
+#: variable from the EXIT trap - the only place a sourced script's
+#: state can still be read after it has exited.
+_TRAP_READ = (
+    """trap 'printf "%s" "${!M6V2_WANT}"' EXIT; """
+    '. "$1" >/dev/null 2>&1')
+
+
+def test_the_module_path_survives_the_marker_export():
+    """The prelude, run for real: the path variable still names a
+    directory with truck.sh in it AFTER every export has happened."""
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("no bash on this machine")
+    found = _DERIVED_GET_PATH.search(fold(read(_M6V2_SH)))
+    assert found, "derived_get no longer names <var>/vehicles/$1/config.yaml"
+    # THE REAL FILE IS SOURCED, NOT A COPY: $REPO is computed from
+    # BASH_SOURCE, so a copy in a tmp dir would resolve to a tmp answer
+    # and the test would pass over the bug it is here for. Sourced with
+    # no argument the dispatch falls to its usage branch and exits 2,
+    # which is what makes the EXIT trap the place to read from - nothing
+    # is started, nothing is swept, and every export has already run.
+    env = dict(os.environ, M6V2_WANT=found.group(1))
+    done = subprocess.run(
+        [bash, "-c",
+         _TRAP_READ,
+         "_", _M6V2_SH],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    resolved = done.stdout.decode("utf-8", "replace").strip()
+    assert os.path.isdir(resolved), (
+        "derived_get would read under {!r}, which is not a directory"
+        .format(resolved))
+    assert os.path.isfile(os.path.join(resolved, "truck.sh")), (
+        "derived_get's base {!r} is not m6_ver2/".format(resolved))

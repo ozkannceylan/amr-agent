@@ -66,9 +66,40 @@ def derived():
 # this file exists to catch.
 # ----------------------------------------------------------------------
 class Vec(object):
+    """geometry_msgs' float fields, AS STRICT AS THE REAL ONES.
+
+    A permissive fake is an inaccurate fake, and this is the exact spot
+    where that cost a live gate. rosidl's generated converter runs
+    `assert PyFloat_Check(field)` in C: an int, a None or a numpy scalar
+    does not raise a Python exception, it ABORTS THE PROCESS -
+    `geometry_msgs__msg__vector3__convert_from_py: Assertion
+    'PyFloat_Check(field)' failed` - so a shell that assigned None here
+    was killed by its own first command while 366 green tests said the
+    wiring was fine (measured 2026-09-02, first live bringup).
+
+    Refusing it here rather than in one test is deliberate: the check
+    then rides EVERY test that publishes a command, which is where a
+    regression of this class would actually appear.
+    """
+
+    __slots__ = ("x", "y", "z", "w")
+
     def __init__(self):
-        self.x = self.y = self.z = 0.0
-        self.w = 1.0
+        object.__setattr__(self, "x", 0.0)
+        object.__setattr__(self, "y", 0.0)
+        object.__setattr__(self, "z", 0.0)
+        object.__setattr__(self, "w", 1.0)
+
+    def __setattr__(self, name, value):
+        # bool is an int and an int is not a float, exactly as
+        # PyFloat_Check reads it.
+        if type(value) is not float:
+            raise TypeError(
+                "rosidl would ABORT here: geometry_msgs float field {!r} "
+                "was given {!r} ({}), and PyFloat_Check accepts a float "
+                "and nothing else".format(name, value,
+                                          type(value).__name__))
+        object.__setattr__(self, name, value)
 
 
 class Twist(object):
@@ -315,6 +346,15 @@ class Rig(object):
 #: exists for.
 TO_S1 = [(-17.0, 10.0), (-13.0, 10.0), (-13.0, 4.25)]
 
+#: TWO TRANSIT LEGS, split at a junction turn and ending nowhere in
+#: particular. It is the OTHER shape, and it has to be a second route
+#: rather than a second reading of the first: TO_S1's two legs are two
+#: CLASSES, so its leg switch changes the behaviour tree and nav2
+#: refuses to preempt across it (see _advance_to). True preemption -
+#: the thing PREEMPT_AT_M was measured for - only ever happens between
+#: legs of the same class, and this is a route that has some.
+TWO_TRANSITS = [(-17.0, 10.0), (-13.0, 10.0), (-13.0, -10.0)]
+
 
 @pytest.fixture
 def rig():
@@ -329,6 +369,17 @@ def driving(rig):
     rig.status()
     rig.tick()
     rig.route(TO_S1)
+    return rig
+
+
+@pytest.fixture
+def transiting(rig):
+    """The same truck on TWO_TRANSITS - one class, so one tree."""
+    rig.mode()
+    rig.tf_at(-17.0, 10.0)
+    rig.status()
+    rig.tick()
+    rig.route(TWO_TRANSITS)
     return rig
 
 
@@ -487,22 +538,115 @@ def test_the_first_leg_goes_out_with_its_own_tree(driving):
     assert back[1] == pytest.approx(10.0, abs=1e-6)
 
 
-def test_the_next_leg_is_sent_at_the_preempt_distance(driving):
+def test_the_next_leg_is_decided_at_the_preempt_distance(driving):
     """P = 1.5 m, and it is nav2_legs' number rather than this shell's."""
     driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M - 0.5, 10.0)
     driving.tick()
     assert len(driving.action.goals) == 1
+    assert driving.adapter.pending_leg is None
     driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
     driving.tick()
+    # THE DECISION IS TAKEN AT P. What it does with it depends on
+    # whether the tree changes, which for TO_S1 it does - see the test
+    # below for why nav2 will not take that as a preemption.
+    assert driving.adapter.pending_leg == 1
+
+
+def test_a_tree_change_is_a_cancel_and_then_a_send(driving):
+    """nav2 REFUSES a preemption that changes the behaviour tree.
+
+    MEASURED LIVE, 2026-09-02, and quoted from bt_navigator's own log:
+    "Preemption request was rejected since the requested BT XML file is
+    not the same as the one that the current goal is executing ...
+    Cancel the current goal and send a new action request if you want to
+    use a different BT XML file. For now, continuing to track the last
+    goal until completion." The rejected goal comes back ABORTED with an
+    EMPTY result - error_code 0 - so the adapter read it as a nav2
+    failure and latched BLOCKED 1.49 m short of the spur foot, which is
+    where EVERY route ends. The order died there.
+
+    So the transition is nav2's own: cancel, and send when the server
+    says the old goal is off it - never on a timer.
+    """
+    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    driving.tick()
+    # 1. cancelled, and NOTHING new sent yet.
+    assert driving.action.cancels == 1
+    assert driving.action.handles[0].cancelled is True
+    assert len(driving.action.goals) == 1
+    assert driving.adapter.pending_leg == 1
+    # 2. more ticks change nothing: a leg already waiting is not
+    #    cancelled a second time.
+    driving.tick()
+    driving.tick()
+    assert driving.action.cancels == 1
+    assert len(driving.action.goals) == 1
+    # 3. the server reports the old goal finished, and only then.
+    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.CANCELED,
+        result=types.SimpleNamespace(error_code=0)))
     assert len(driving.action.goals) == 2
-    # THE STATION TREE, because leg 2 of spawn -> S5 is the spur into
-    # the bay: nav2_legs.CLASS_TREE names the key and this shell only
-    # looks it up in the config.
+    assert driving.adapter.pending_leg is None
+    assert driving.adapter.state.state == nav2_state.EN_ROUTE
+    # THE STATION TREE, because leg 2 is the spur into the bay:
+    # nav2_legs.CLASS_TREE names the key and this shell only looks it
+    # up in the config.
     assert driving.action.goals[1]["behavior_tree"].endswith(
         os.path.basename(driving.cfg.s("nav.bt_xml_station")))
 
 
-def test_a_preempted_legs_abort_is_not_a_failure(driving):
+def test_the_rejected_preemptions_own_abort_is_not_a_failure(driving):
+    """The same switch, when nav2 answers the cancel with ABORTED.
+
+    A cancelled NavigateToPose does not always come back CANCELED - a
+    BT that was already failing terminates ABORTED with whatever code it
+    had. Either way the goal is OFF the server, which is the only fact
+    the pending leg is waiting for.
+    """
+    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    driving.tick()
+    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.ABORTED,
+        result=types.SimpleNamespace(error_code=0)))
+    assert driving.adapter.state.state == nav2_state.EN_ROUTE
+    assert len(driving.action.goals) == 2
+
+
+def test_true_preemption_still_runs_between_legs_of_one_class(transiting):
+    """P = 1.5 m with NO cancel in it, which is what it was measured for.
+
+    Two transit legs share nav.bt_xml, so bt_navigator takes the second
+    goal as a real preemption and displaces the first itself - the truck
+    never stops, and `executing` never flickers.
+    """
+    transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M - 0.5, 10.0)
+    transiting.tick()
+    assert len(transiting.action.goals) == 1
+    transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    transiting.tick()
+    assert len(transiting.action.goals) == 2
+    assert transiting.action.cancels == 0
+    assert transiting.adapter.pending_leg is None
+    assert transiting.action.goals[1]["behavior_tree"].endswith(
+        os.path.basename(transiting.cfg.s("nav.bt_xml")))
+
+
+def test_a_cancel_takes_the_waiting_leg_with_it(driving):
+    """A pending leg that outlived the route would be a goal nobody
+    asked for, sent after the door that asked for it had closed."""
+    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    driving.tick()
+    assert driving.adapter.pending_leg == 1
+    driving.send("auto/goal", types.SimpleNamespace(data=""))
+    assert driving.adapter.pending_leg is None
+    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.CANCELED,
+        result=types.SimpleNamespace(error_code=0)))
+    assert len(driving.action.goals) == 1
+    assert driving.adapter.state.state == nav2_state.IDLE
+
+
+def test_a_preempted_legs_abort_is_not_a_failure(transiting):
     """THE GENERATION COUNTER, and it is the whole of Decision 2's tail.
 
     nav2 displaces a running goal itself, so the leg that was preempted
@@ -510,13 +654,13 @@ def test_a_preempted_legs_abort_is_not_a_failure(driving):
     latch BLOCKED on a truck that is driving perfectly, and vda_agent
     would report pathBlocked on a corridor that is clear.
     """
-    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
-    driving.tick()
-    assert len(driving.action.handles) == 2
-    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
+    transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    transiting.tick()
+    assert len(transiting.action.handles) == 2
+    transiting.action.handles[0].result_future.fire(types.SimpleNamespace(
         status=Messages.ABORTED,
         result=types.SimpleNamespace(error_code=106)))
-    assert driving.adapter.state.state == nav2_state.EN_ROUTE
+    assert transiting.adapter.state.state == nav2_state.EN_ROUTE
 
 
 def test_a_live_abort_is_blocked_with_the_named_note(driving):
@@ -722,3 +866,52 @@ def test_the_masked_address_has_exactly_one_home(derived):
     # follower.sector_min applies the contour itself.
     rows = dict((row.label, row.address) for row in shell.wiring(cfg, VID))
     assert rows["scan"] == cfg.s("topics.scan_nav")
+
+
+# ----------------------------------------------------------------------
+# "HOLD THE STEER AXIS" is a number on this wire (live, 2026-09-02)
+# ----------------------------------------------------------------------
+def test_a_sub_creep_twist_holds_the_steer_angle_it_last_sent(driving):
+    """nav2_cmd answers None for "hold"; the wire has no way to say it.
+
+    THE STANDING START IS THE CASE. nav2's controller ramps from rest
+    through the creep deadband, so the first twists of the first leg are
+    exactly the ones cmd_vel_tricycle_core answers `steer_rad=None` to -
+    "Traction zero, steer HELD". Published straight through, that None
+    aborts the process inside rosidl and the truck never moves; centred
+    to 0.0 instead, the wheel is commanded to swing back to straight at
+    every crawl, which inside a station spur is a motion into the rack.
+    """
+    import nav2_cmd
+    limits = driving.adapter.limits
+
+    # 1. a real cornering twist, well over the deadband: a real angle.
+    driving.smoothed(-0.30, 0.20)
+    driving.tick()
+    linear, angular = driving.cmd
+    assert type(angular) is float and angular != 0.0
+    cornering = angular
+
+    # 2. the same corner, now crawling under the creep deadband. The
+    #    donor declines to answer a steer angle at all ...
+    crawl = 0.5 * limits.creep_speed_mps
+    assert nav2_cmd.translate(-crawl, 0.20, limits).angular_z is None
+    #    ... and the wire still carries the angle the wheel is at.
+    driving.smoothed(-crawl, 0.20)
+    driving.tick()
+    linear, angular = driving.cmd
+    assert type(linear) is float and type(angular) is float
+    assert linear == 0.0
+    assert angular == pytest.approx(cornering)
+
+
+def test_leaving_en_route_centres_the_wheel_and_the_hold_follows(driving):
+    """Outside EN-ROUTE the contract is zeros on BOTH fields, so the
+    held angle is zero too - the attribute is the last angle SENT."""
+    driving.smoothed(-0.30, 0.20)
+    driving.tick()
+    assert driving.cmd[1] != 0.0
+    driving.status(motor=False)            # SAFETY-STOP: zeros flow
+    driving.tick()
+    assert driving.cmd == (0.0, 0.0)
+    assert driving.adapter.held_steer_rad == 0.0

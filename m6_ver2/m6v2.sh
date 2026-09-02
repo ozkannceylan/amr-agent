@@ -50,16 +50,16 @@ set -uo pipefail
 
 TOOL="m6v2.sh"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-M6V2="$REPO/m6_ver2"
+M6V2_DIR="$REPO/m6_ver2"
 M6="$REPO/m6"
-PIDFILE="$M6V2/.m6v2_pids"
-VIDFILE="$M6V2/.m6v2_vids"
-LOGDIR="$M6V2/logs"
-TRUCK="$M6V2/truck.sh"
-WORLD_LAUNCH="$M6V2/world.launch.py"
-DERIVE="$M6V2/tools/instantiate_truck.py"
+PIDFILE="$M6V2_DIR/.m6v2_pids"
+VIDFILE="$M6V2_DIR/.m6v2_vids"
+LOGDIR="$M6V2_DIR/logs"
+TRUCK="$M6V2_DIR/truck.sh"
+WORLD_LAUNCH="$M6V2_DIR/world.launch.py"
+DERIVE="$M6V2_DIR/tools/instantiate_truck.py"
 # The FLEET side's derivation and its one override. See start().
-FIREWALL="$M6V2/tools/fleet_odom_firewall.py"
+FIREWALL="$M6V2_DIR/tools/fleet_odom_firewall.py"
 ROS_SETUP="/opt/ros/jazzy/setup.bash"
 # The broker is vendored into the user's home rather than installed -
 # this WSL has no usable sudo - and BROKER_LIB is not optional: those
@@ -88,6 +88,14 @@ export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$M6/too
 # THE MARKER. Everything this script spawns inherits it, and truck.sh
 # stamps M6V2_VID=<vid> on every child of its own, so a `^M6V2` line in
 # a process's environ is the definition of "in this cell" - see ours().
+#   IT IS A SCALAR AND THE MODULE PATH IS M6V2_DIR, WHICH IS NOT THE
+#   SAME NAME BY ACCIDENT. This export used to be spelled over the path
+#   variable, and every assignment above survived it because those are
+#   resolved BEFORE this line runs - so the only casualty was the one
+#   expansion that happens at CALL time, derived_get()'s, which read
+#   `1/vehicles/f1/config.yaml`, found nothing, and made check_isolation
+#   refuse a perfectly good derivation with "the derivation says ''".
+#   Measured live, 2026-09-02, first bringup of this cell.
 export M6V2=1
 
 # start's default is HEADLESS, which is the other way round from m6.sh.
@@ -131,7 +139,7 @@ derived_get() {  # derived_get <vid> <dotted.key>
 node = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 for part in sys.argv[2].split("."):
     node = node[part]
-print(node)' "$M6V2/vehicles/$1/config.yaml" "$2" 2>/dev/null
+print(node)' "$M6V2_DIR/vehicles/$1/config.yaml" "$2" 2>/dev/null
 }
 
 # The stack as command-line patterns, in SHUTDOWN ORDER, top to bottom.
