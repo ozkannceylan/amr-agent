@@ -623,11 +623,26 @@ write_state() {
 # ------------------------------- START -------------------------------
 start() {
     configure
+    # ---- IS ONE ALREADY UP - AND THAT IS A LIVENESS QUESTION ----
+    # child_alive() and not truck_ours(), for assert_children_alive()'s
+    # reason turned the other way up. The torn /proc environ read makes
+    # the ownership predicate answer "no" about a running child of this
+    # very script; here a "no" does not abort a bringup, it PERMITS one,
+    # and the refusal it skips is the one below. Two Nav2 stacks on one
+    # truck is two publishers of map -> <vid>/odom with nothing in any
+    # log to say why the frames fight.
+    #   WHAT THE KERNEL'S ANSWER COSTS HERE, since this pid file can
+    #   predate a reboot and child_alive() does not guard a recycled
+    #   pid: a stranger that has come round to hold one of these numbers
+    #   now makes start refuse. That is the recoverable direction and
+    #   the refusal already names the recovery - `stop` sweeps with
+    #   truck_ours(), so it kills nothing that is not this truck's, and
+    #   it deletes this file.
     if [ -f "$PIDFILE" ]; then
         local pid name live=""
         while read -r pid name; do
             case "$pid" in ''|*[!0-9]*) continue ;; esac
-            truck_ours "$pid" && live="$live${live:+ }$name"
+            child_alive "$pid" && live="$live${live:+ }$name"
         done < "$PIDFILE"
         [ -z "$live" ] || refuse "truck $VID is not already up" "$PIDFILE" \
             "these children are still running: $live" \
@@ -1042,10 +1057,16 @@ status() {
             "monitor=$(sed -n 's/^monitor=//p' "$STATEFILE") scan=$(sed -n 's/^masked_scan=//p' "$STATEFILE")"
         printf '  %-10s %s\n' "started" "$(sed -n 's/^started=//p' "$STATEFILE")"
     fi
+    # ALIVE IS THE KERNEL'S WORD AND NOT THE ENVIRONMENT'S, the same
+    # ruling as the startup check's: a torn environ read prints DOWN
+    # beside a running child and sends the operator to a log nobody is
+    # writing. `status` walks twelve pids every time it is run and it is
+    # the one instrument there is for "is this stack up", so it is the
+    # last place a lie of that shape may live.
     local pid name down=0
     while read -r pid name; do
         case "$pid" in ''|*[!0-9]*) continue ;; esac
-        if truck_ours "$pid"; then
+        if child_alive "$pid"; then
             printf '  %-10s %-7s pid %s\n' "$name" "ALIVE" "$pid"
         else
             printf '  %-10s %-7s %s\n' "$name" "DOWN" "$LOGDIR/$name.log"

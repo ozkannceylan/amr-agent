@@ -35,6 +35,8 @@ def read(path):
 
 TRUCK = read(TRUCK_SH)
 COMMON = read(COMMON_SH)
+#: The end of a shell function, for the source slices below.
+_END = chr(10) + "}" + chr(10)
 
 
 def logical_lines(text):
@@ -507,3 +509,57 @@ def test_liveness_is_asked_of_the_kernel_and_not_of_the_environment():
     sweep = COMMON[COMMON.index("truck_sweep() {"):]
     sweep = sweep[:sweep.index("\n}\n")]
     assert 'truck_ours "$pid"' in sweep
+def test_start_asks_the_kernel_whether_a_stack_is_already_up():
+    """The G2 leftover, first window - and here a "no" PERMITS a bringup.
+
+    Same tear as assert_children_alive()'s: `/proc/<pid>/environ` is not
+    an atomic read, a short one ends before the variable configure()
+    exports LAST, and truck_ours() then answers "not ours" about a
+    running child of this very script. At every other window that
+    mistake is safe. At this one it is the worst answer available: the
+    refusal it skips is the one that says TWO STACKS FOR ONE TRUCK IS
+    TWO PUBLISHERS OF map -> <vid>/odom, and tf2 carries whichever
+    arrived last. The cost of the torn read here is therefore a second
+    complete Nav2 stack started deliberately on a truck that already has
+    one, with nothing in any log saying why the frames now fight.
+
+    WHAT THE KERNEL'S ANSWER COSTS, stated rather than skipped. This pid
+    file, unlike assert_children_alive()'s, can predate a reboot, and
+    child_alive() does not guard a RECYCLED pid: a stranger holding one
+    of these numbers now makes start refuse. That is the recoverable
+    direction, and the refusal already names the recovery - `stop`
+    sweeps with truck_ours(), so it kills nothing that is not this
+    truck's, and it deletes the file. The other direction is silent.
+    """
+    # THE CALL FORM AND NOT THE WORD: the window carries a comment that
+    # names truck_ours() to say why it is NOT the predicate here, and a
+    # pin that forbade the word would forbid the explanation with it.
+    up = TRUCK[TRUCK.index("start() {"):]
+    up = up[:up.index('rm -f "$PIDFILE"')]
+    assert 'child_alive "$pid"' in up
+    assert 'truck_ours "$pid"' not in up
+
+
+def test_status_asks_the_kernel_and_stop_goes_on_asking_ownership():
+    """The G2 leftover, second window - and the one that must not move.
+
+    status() walks twelve pids every time it is run and is the only
+    instrument there is for "is this stack up". On the four-truck
+    bringup that measured the tear, truck_ours() was wrong about a
+    living pid once in ~800 asks; a `status` that inherits that prints
+    DOWN beside a running child and names a log nobody is writing.
+
+    stop() and truck_sweep() keep the ownership predicate, unchanged.
+    There a "no" means LEAVE IT ALONE - a process this runner cannot
+    identify is one it must not kill - so the torn read is allowed to be
+    wrong in that direction and costs nothing when it is.
+    """
+    body = TRUCK[TRUCK.index("status() {"):]
+    body = body[:body.index(_END)]
+    assert 'child_alive "$pid"' in body
+    assert 'truck_ours "$pid"' not in body
+
+    kill = TRUCK[TRUCK.index("stop() {"):]
+    kill = kill[:kill.index(_END)]
+    assert 'truck_ours "$pid"' in kill
+    assert 'child_alive "$pid"' not in kill

@@ -194,6 +194,56 @@ def test_ownership_needs_the_partition_and_the_marker(source):
     assert body.count("grep -q") >= 2
 
 
+def test_this_ledger_walk_keeps_ours_and_says_why(source):
+    """The G2 tear reaches two scripts and is FIXED in only one.
+
+    truck.sh's start() and status() had to stop asking truck_ours()
+    whether a child is alive: /proc/<pid>/environ can be served SHORT,
+    and _truck_common.sh's configure() exports M6V2_VID LAST of the
+    three, so the very last line of the block is the one a torn read
+    loses. Measured 2026-09-02 on the three-truck cell: one "no" in 2400
+    asks of a live bt_navigator, and the step that said no was the
+    M6V2_VID line every time.
+
+    THIS SCRIPT'S ANSWER IS NOT THE SAME ANSWER, for two reasons that
+    are both checkable below.
+
+    Its marker is exported EARLY - `export M6V2=1` sits in the header
+    block, above ours(), above spawn() and above every command - so the
+    variable ours() greps for is near the FRONT of a child's environ
+    rather than at the end of it, which is the position a short read
+    takes last.
+
+    And ours() is doing a second job here that child_alive() cannot do
+    at all: recorded() proves a pid is one of THIS FAMILY (its cmdline
+    carries m6), but m6.sh's plain cell carries m6 too. It is the M6V2
+    marker, and only the marker, that separates this cell's world from
+    the neighbour cell's - which is the distinction plain_m6_cell() is
+    built on. Dropping ours() here to buy a tear that has not been
+    measured here would sell that.
+
+    So the ledger walk leads with the kernel and keeps ownership behind
+    it. If the marker export ever moves below the machinery, this pin
+    fails and the reasoning above has to be re-made rather than assumed.
+    """
+    assert source.index("export M6V2=1") < source.index("ours() {")
+    assert source.index("export M6V2=1") < source.index("spawn() {")
+    assert source.index("export M6V2=1") < source.index("status() {")
+
+    status = re.search(r"(?ms)^status\(\) \{.*?^\}", source).group(0)
+    assert 'kill -0 "$pid"' in status
+    assert 'recorded "$pid"' in status
+    assert 'ours "$pid"' in status
+
+    # start()'s already-up check asks the kernel and the family, and
+    # NOT the marker: there a "no" permits a second cell, so the pid
+    # that is merely unreadable must still count as up.
+    up = source[source.index("# ALREADY UP?"):]
+    up = up[:up.index('rm -f "$PIDFILE"')]
+    assert 'kill -0 "$pid"' in up
+    assert 'recorded "$pid"' in up
+
+
 def test_the_sweep_patterns_are_m6s_minus_nav_node_plus_this_world(source,
                                                                    m6_source):
     def patterns(text):
