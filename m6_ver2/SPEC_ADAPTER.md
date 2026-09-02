@@ -478,3 +478,23 @@ allowed to change is `test_m6.py` where it pins the bringup child list
    from a moving, on-axis pose and no off-heading standing start is
    ever handed to the planner. SPUR_EXIT keeps its stop (D10).
    SPLIT_ABOVE_M follows the new sum.
+
+9. **Ring chains drive /follow_path; Smac plans only manoeuvres
+   (G1-C8 ruling, 2026-09-03).** Four waves measured one family from
+   one source: Smac re-deciding degenerate ring geometry every replan
+   - exhaustion refusals (runs 15/16: 13+8 over FREE paint), the
+   two-sense chatter §5×§8 exposed (14 sign flips/30 s, 3/8 align legs
+   never closing), and the corridor drift open question 5 measured at
+   +0.9..2.4 m. The traffic ledger grants a POLYLINE; freespace
+   planning on it was always a translation error. The adapter now
+   builds the ring chain's Path itself - granted polyline, corners
+   rounded at MIN_TURN_RADIUS_M, densified ~0.1 m, orientations laid
+   by the D7 rule resolved ONCE per chain at dispatch - and sends it
+   straight to /fN/follow_path (FollowPathRPP, general_goal_checker).
+   No Smac, no replans, no preemption chain, no ALIGN class on ring
+   legs; the sense is decided once and the corridor is honoured by
+   construction. STATION and SPUR_EXIT legs keep NavigateToPose+Smac
+   (the manoeuvre is theirs). ClosingWatch and the state machine stand
+   unchanged. §8's in-motion property is inherited trivially (one Path
+   spans the chain); §5 stands (no DSP anywhere); D12's ALIGN retires
+   with its reason recorded.
