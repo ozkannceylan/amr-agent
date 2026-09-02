@@ -451,3 +451,59 @@ def test_the_argument_parser_refuses_before_it_sources_anything(argv):
                           stderr=subprocess.STDOUT)
     assert done.returncode == 2, done.stdout.decode("utf-8", "replace")
     assert b"usage:" in done.stdout
+
+
+def test_liveness_is_asked_of_the_kernel_and_not_of_the_environment():
+    """The G1 leftover that only a three-truck bringup can reach.
+
+    `/proc/<pid>/environ` IS NOT AN ATOMIC READ. The kernel serves it out
+    of the target's own memory and can return SHORT - and a short read
+    ends before the variables exported LAST, which is exactly where
+    _truck_common.sh's configure() puts M6V2_VID. truck_ours() then sees
+    GZ_PARTITION and no M6V2_VID and answers "not ours".
+
+    In truck_sweep() and stop() that answer is SAFE: a process this
+    runner cannot identify is one it must not kill. In
+    assert_children_alive() the identical answer meant "it exited", and
+    that is the unsafe direction - a running child declared dead and a
+    good bringup aborted with its stack half up.
+
+    Measured 2026-09-02 on the four-truck bringup (M6V2-G2 rung 4):
+    truck.sh refused for f3 naming `odom`, for f4 naming `amcl` and
+    `behavior_server`, and on the retry for f3 naming `bt_navigator` -
+    four different children over two bringups, every one of them
+    running. f3's odom wrote its next log line twenty seconds after
+    being declared exited, and `truck.sh f3 status` listed all twelve
+    ALIVE. A probe of truck_ours() against one of those pids answered
+    "no" once in 800 asks, and the step that said no was the M6V2_VID
+    line - never the partition line, which sits earlier in the block.
+    At one truck that check is ~25 asks a bringup, which is why G1 never
+    saw it; at four it is a hundred and it fires most runs.
+
+    So liveness is asked of the kernel: kill -0 and the process state
+    field. Both are shell builtins, which also matters at the one place
+    this runs - one second after twelve spawns on a saturated machine,
+    where a forked $( ) is itself something that can fail.
+    """
+    body = COMMON[COMMON.index("child_alive() {"):]
+    body = body[:body.index("\n}\n")]
+    # The kernel's own two answers, and no environ read among them.
+    assert 'kill -0 "$1"' in body
+    assert '/proc/$1/stat' in body
+    assert "environ" not in body
+    assert "truck_ours" not in body
+    # A zombie is not alive: the child exec'd, died, and has not been
+    # reaped, which is precisely the shape this gate exists to catch.
+    assert "Z*" in body
+
+    # And the liveness question is asked with it, not with ownership.
+    check = TRUCK[TRUCK.index("assert_children_alive() {"):]
+    check = check[:check.index("\n}\n")]
+    assert 'child_alive "$pid"' in check
+    assert "truck_ours" not in check
+
+    # The sweep keeps its conservative predicate, unchanged: there, a
+    # "no" must go on meaning LEAVE IT ALONE.
+    sweep = COMMON[COMMON.index("truck_sweep() {"):]
+    sweep = sweep[:sweep.index("\n}\n")]
+    assert 'truck_ours "$pid"' in sweep

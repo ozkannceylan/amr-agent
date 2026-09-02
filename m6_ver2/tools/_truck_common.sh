@@ -136,6 +136,51 @@ truck_ours() {  # truck_ours <pid>
     return 0
 }
 
+# IS THIS PID STILL RUNNING - WHICH IS NOT THE SAME QUESTION AS WHOSE IT
+# IS, AND THE TWO USED TO SHARE A PREDICATE.
+#   /proc/<pid>/environ IS NOT AN ATOMIC READ. The kernel serves it out
+#   of the target process's own memory and is entitled to come back
+#   SHORT; a short read ends before the variables exported LAST, and
+#   configure() above exports M6V2_VID last of the three. truck_ours()
+#   then sees the partition, does not see the vid, and answers "not
+#   ours" about a child of this very script.
+#   THAT ANSWER IS SAFE WHERE truck_ours IS FOR. In truck_sweep() and
+#   stop() a process this runner cannot identify is one it must not
+#   kill, so "no" costs nothing. In truck.sh's assert_children_alive()
+#   the identical "no" used to mean "it exited during startup" - the
+#   unsafe direction - and it aborted a bringup whose stack was fine.
+#   MEASURED 2026-09-02, the four-truck bringup (M6V2-G2 rung 4).
+#   truck.sh refused for f3 naming `odom`, for f4 naming `amcl` and
+#   `behavior_server`, and on the retry for f3 naming `bt_navigator`:
+#   four different children over two bringups, all four running. f3's
+#   odom wrote its next log line twenty seconds after being declared
+#   exited, and `truck.sh f3 status` then listed all twelve ALIVE. A
+#   probe of truck_ours() against one of those pids answered no once in
+#   800 asks, and the step that said no was the M6V2_VID line every
+#   time - never the partition line, which sits earlier in the block.
+#   One truck asks that question about twenty-five times a bringup,
+#   which is why G1 never saw it; four trucks ask it a hundred times.
+#   THE PID RECYCLE THIS DOES NOT GUARD IS NOT A RISK HERE: the only
+#   caller is the startup check, and every pid it reads was written into
+#   the ledger by the child itself, seconds earlier, in this bringup.
+#   BOTH ANSWERS ARE SHELL BUILTINS, no fork. That matters at the one
+#   place this runs - a second after twelve spawns on a saturated
+#   machine, where a forked $( ) is itself a thing that can fail.
+#   An unreadable stat is treated as ALIVE for truck_ours's own reason:
+#   between the two directions, the one that does not abort a good
+#   bringup over a failed read is the one to be wrong in.
+child_alive() {  # child_alive <pid>
+    local stat
+    kill -0 "$1" 2>/dev/null || return 1
+    read -r stat < "/proc/$1/stat" 2>/dev/null || return 0
+    # comm sits in parens and may hold spaces; the state is the field
+    # after the LAST ')'.
+    case "${stat##*) }" in
+        Z*) return 1 ;;
+    esac
+    return 0
+}
+
 truck_sweep() {  # truck_sweep <signal>
     local sig="$1" pat pid cmd
     for pat in "${M6V2_PATTERNS[@]}"; do

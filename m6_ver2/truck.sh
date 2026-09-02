@@ -385,11 +385,16 @@ check_world() {
 # `start && ...` that saw exit 0 over a stack missing a process is worse
 # than a stop. It is a function because the nav arm's five children go
 # up after the first call and the same question has to be asked again.
+#   IT ASKS child_alive AND NOT truck_ours, and the two are different
+#   questions - see _truck_common.sh's note over child_alive for the
+#   torn /proc environ read that made the ownership predicate answer
+#   "no" about four running children on the four-truck bringup this
+#   check exists to protect.
 assert_children_alive() {
     local pid name dead="" logs="" n
     while read -r pid name; do
         case "$pid" in ''|*[!0-9]*) continue ;; esac
-        truck_ours "$pid" || dead="$dead${dead:+ }$name"
+        child_alive "$pid" || dead="$dead${dead:+ }$name"
     done < "$PIDFILE"
     [ -n "$dead" ] || return 0
     for n in $dead; do logs="$logs${logs:+, }$LOGDIR/$n.log"; done
