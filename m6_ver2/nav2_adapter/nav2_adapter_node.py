@@ -699,13 +699,23 @@ class Adapter(object):
         # ends on the station; the message aims ARRIVE_BIAS_M past it
         # (nav2_legs.goal_point). Printing one of them would leave a run
         # unable to say whether it aimed past at all.
+        #   AND IT CARRIES THE SPEED SINCE AMENDMENTS 8. That ruling is
+        # a claim about an INSTANT - the alignment leg hands the long
+        # goal over while the truck is still moving and straight - and
+        # no other line on this rig can settle it: the leg table is
+        # written at the dispatch, and the speed lives on /est/odom
+        # sampled by somebody else at some other time. So the dispatch
+        # quotes the EKF's own body twist, signed, because on this model
+        # forks-first is NEGATIVE (Decision 1's sign audit) and an
+        # unsigned number would hide which end was leading.
         self.node.get_logger().info(
             "leg {}/{} {} tree={} end=({:.2f}, {:.2f}) goal=({:.2f}, "
-            "{:.2f}) goal_yaw={:+.3f} truck_yaw={} {}".format(
+            "{:.2f}) goal_yaw={:+.3f} truck_yaw={} v={:+.3f} {}".format(
                 index + 1, len(self.legs), leg.klass, leg.tree_key,
                 leg.end[0], leg.end[1], leg.goal[0], leg.goal[1], goal_yaw,
                 "none" if current_yaw is None
                 else "{:+.3f}".format(current_yaw),
+                self.body_twist[0],
                 "" if current_yaw is None else "turn={:+.3f}".format(
                     follower.norm_ang(goal_yaw - current_yaw))))
         goal = self.msgs.nav_goal(

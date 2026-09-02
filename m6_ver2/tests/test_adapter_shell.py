@@ -314,6 +314,15 @@ class Rig(object):
         twist.angular.z = w
         self.send("cmd_vel_smoothed", twist)
 
+    def filtered(self, v, w=0.0):
+        """The EKF's own body twist - what the leg table quotes as `v`."""
+        body = types.SimpleNamespace(
+            linear=types.SimpleNamespace(x=v),
+            angular=types.SimpleNamespace(z=w))
+        self.send(self.cfg.s("topics.odometry_filtered"),
+                  types.SimpleNamespace(
+                      twist=types.SimpleNamespace(twist=body)))
+
     def route(self, points, label="ORD-1", arrive_m=None):
         payload = {"points": [list(p) for p in points], "label": label}
         if arrive_m is not None:
@@ -1147,6 +1156,64 @@ def test_the_leg_after_a_bay_mouth_is_built_on_the_yaw_at_the_SEND(rig):
     east = _goal_yaw(rig, 1)
     assert abs(follower.norm_ang(east - math.pi)) < 1e-6
     assert _turn(east, -1.9) <= math.pi / 2.0
+
+
+def test_the_alignment_leg_hands_the_long_goal_over_in_motion(rig):
+    """AMENDMENTS 8, ON THE SHELL. D10's stop is at the MOUTH only.
+
+    Out of S1: spur exit to the mouth (a stop, nav2's own SUCCEEDED),
+    then the alignment leg, then 13 m of ring east. Run 15 measured the
+    alignment leg being driven to a position-only 0.60 m box and
+    completing mid-turn; it does not stop any more, so the long goal
+    leaves through the SAME door every other transit uses - a true
+    preemption, no cancel, and the truck still rolling.
+    """
+    _at_s1(rig, float(STATIONS["S1"]["yaw"]))
+    rig.route(OUT_OF_S1)
+    assert [leg.klass for leg in rig.adapter.legs] == [
+        nav2_legs.SPUR_EXIT, nav2_legs.ALIGN, nav2_legs.TRANSIT]
+    # the mouth: driven to its own goal, so nav2 finishes it
+    rig.tf_at(-13.0, 10.0, -1.571)
+    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
+    assert len(rig.action.goals) == 2
+    assert rig.adapter.legs[rig.adapter.leg_i].klass == nav2_legs.ALIGN
+    # ... and the alignment leg is superseded P short of its own end,
+    # with the truck moving. No cancel: one tree, a true preemption.
+    align_end = rig.adapter.legs[1].end
+    rig.filtered(-0.30)
+    rig.tf_at(align_end[0] - nav2_legs.PREEMPT_AT_M + 0.1, align_end[1],
+              math.pi)
+    rig.tick()
+    assert len(rig.action.goals) == 3
+    assert rig.action.cancels == 0
+    assert rig.adapter.pending_leg is None
+    assert rig.adapter.legs[rig.adapter.leg_i].klass == nav2_legs.TRANSIT
+
+
+def test_the_leg_table_quotes_the_speed_the_handover_happened_at(rig):
+    """THE SEAM AMENDMENTS 8 HAS TO BE READ THROUGH.
+
+    "It hands over in motion" is a claim about a number no other line
+    on this rig carries: the leg table is written at the dispatch and
+    the truck's speed is only on /est/odom, sampled elsewhere. So the
+    dispatch line carries it, signed, from the EKF's own body twist -
+    forks-first is negative on this model (Decision 1's sign audit).
+    """
+    lines = []
+    rig.node.get_logger = lambda: types.SimpleNamespace(
+        info=lines.append, warn=lines.append)
+    _at_s1(rig, float(STATIONS["S1"]["yaw"]))
+    rig.filtered(0.0)
+    rig.route(OUT_OF_S1)
+    assert "v=+0.000" in lines[0], lines[0]
+    rig.filtered(-0.301)
+    rig.tf_at(-13.0, 10.0, -1.571)
+    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
+    dispatch = [line for line in lines if line.startswith("leg 2/3")]
+    assert len(dispatch) == 1, lines
+    assert "v=-0.301" in dispatch[0], dispatch[0]
 
 
 def test_the_same_leg_keeps_the_travel_direction_from_the_other_side(rig):

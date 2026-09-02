@@ -78,10 +78,12 @@ TRANSIT = "transit"
 #: THE SHORT ON-RING GOAL THAT OPENS A LONG LEG ENTERED OFF A TURN
 #: (defect D12, run 12, 2026-09-02). Its own class rather than a flag on
 #: a transit, because everything that reads a leg has to be able to see
-#: it: the adapter logs the class on dispatch, DRIVEN_TO_ITS_GOAL is
-#: keyed on it, and an operator reading `leg 2/6 align` on a rig is
-#: reading the reason the truck stopped on an empty aisle. See
-#: _align_split for the measurement.
+#: it: the adapter logs the class on dispatch, and an operator reading
+#: `leg 2/6 align` on a rig is reading the reason a 13 m goal did not go
+#: out at the turn. Since AMENDMENTS 8 it is NOT in DRIVEN_TO_ITS_GOAL -
+#: it hands over at P like any transit, and what makes it an alignment
+#: leg is its LENGTH and nothing else. See _align_split and ALIGN_M for
+#: both measurements.
 ALIGN = "align"
 
 #: LEG CLASS -> (controller name, the config.yaml key holding its tree).
@@ -173,19 +175,105 @@ PREEMPT_AT_M = 1.5
 #: configured and therefore still the one P has to clear.
 MPPI_GOAL_THRESHOLD_M = 1.4
 
-#: HOW FAR ALONG A LEG ITS ALIGNMENT GOAL SITS (defect D12).
-#:   IT HAS TO CLEAR PREEMPT_AT_M, and that is the whole of the lower
-#: bound: _merge_short folds any non-final run shorter than P forward,
-#: so an alignment leg at or under P would be deleted by the next line
-#: of the same function and the long goal would be back at the turn.
-#:   AND IT HAS TO BE LONGER THAN THE TRUCK. The model is 3.815 m over
-#: the tines and 1.4 m over the chassis with a 1.25 m turning radius
-#: (runs_to_its_goal), so a goal closer than a body length is a goal the
-#: truck is already standing on the far side of its own turn from.
-#: 2.75 m clears P by 1.25 m and the chassis by 1.35, and it is short
-#: enough that the quarter turn is the ONLY thing in the plan - which is
-#: the point: one goal, one decision.
-ALIGN_M = 2.75
+#: THE GOAL CHECKER EVERY LEG BUT THE BAY'S IS DECIDED BY - nav2.yaml's
+#: `general_goal_checker.xy_goal_tolerance`, named by the RPP tree's
+#: FollowPath (instantiate_truck.GENERAL_CHECKER). Carried here for the
+#: same reason as the line above: it is not this file's parameter, it is
+#: the REASON one of this file's numbers has the value it has. AND IT IS
+#: POSITION ONLY, because a tricycle cannot rotate in place - so nothing
+#: in nav2 has an opinion about the HEADING a leg finishes on, and any
+#: leg allowed to finish may finish in the middle of its own turn.
+TRANSIT_GOAL_CHECKER_M = 0.60
+
+#: THE MODEL'S OWN MINIMUM TURNING RADIUS, measured on this rig and
+#: declared in m5_ver3/config.yaml `nav.min_radius_m` (EVIDENCE_NAV_V3
+#: 2.1 / 20.5 item 4) - not the geometric one the steer stop implies.
+#: Carried here because an arc length needs a radius; changing it here
+#: changes nothing about the truck, which is why it is quoted from the
+#: file that does.
+MIN_TURN_RADIUS_M = 1.25
+
+#: HOW FAR THE TRUCK DRIVES TO TURN THROUGH A RIGHT ANGLE. Every turn on
+#: this floor IS a right angle - route.py's ring, spine and pick aisle
+#: meet square and every spur leaves its ring leg square - so the
+#: quarter arc is THE turn, and at the minimum radius it is the longest
+#: version of it. Arithmetic, not a knob.
+QUARTER_ARC_M = math.pi / 2.0 * MIN_TURN_RADIUS_M
+
+#: HOW MUCH STRAIGHT RUNNING MAKES A TURN FINISHED. Off the end of the
+#: arc the truck is ON the new axis and not yet ALONG it: the steer is
+#: still over and the body is still coming round. One WHEELBASE is the
+#: length scale of that - m5_ver3/config.yaml `vehicle.wheelbase_m`,
+#: 1.05 m, the steer wheel at body x = +0.55 and the rear axle at
+#: -0.50 - and the bicycle model says what it buys: dpsi/ds =
+#: tan(steer)/L, so nulling run-15's own WORST residual skew (0.90 rad,
+#: measured at an alignment goal) at a steer of 0.75 rad - well inside
+#: the 1.25 rad command limit - takes 0.90 x 1.05 / tan(0.75) = 1.01 m.
+#: One wheelbase covers the worst thing this rig has actually done.
+STRAIGHTEN_M = 1.05
+
+#: HOW FAR ALONG A LEG ITS ALIGNMENT GOAL SITS (defect D12; the
+#: arithmetic is SPEC_ADAPTER.md AMENDMENTS 8, G1-C7, 2026-09-03).
+#:   IT IS A SUM OF THREE MEASUREMENTS AND NOT A CHOICE.
+#:
+#:     quarter arc  1.96 m   the turn itself, at the measured radius
+#:     P            1.50 m   because the leg HANDS OVER P short of its
+#:                           own goal now - P is inside this length
+#:     straighten   1.05 m   one wheelbase of straight before that
+#:     -------------------
+#:     ALIGN_M      4.51 m
+#:
+#:   WHAT 2.75 GOT WRONG, MEASURED (run 15). The alignment leg used to
+#: be driven to its goal against the transit tree's POSITION-ONLY
+#: 0.60 m checker, so nav2 could declare it finished 0.60 m short: the
+#: earliest legal completion sat 2.15 m along a leg whose first 1.96 m
+#: IS the arc. That is 0.19 m of straight running - under a fifth of a
+#: wheelbase - and a truck is not straight after 0.19 m. Twice in one
+#: session it landed inside it: `align 6/8 end=(-2.75, -10.00)
+#: -> COMPLETED`
+#: with the truck at (-2.71, -10.53) on -0.90 rad, 0.53 m off the line
+#: and mid-arc. Smac was then asked for the 4.59 m transit out of that
+#: pose and refused it ten times - "exceeded maximum iterations", over
+#: free paint - and the order died on the closing watchdog, standing
+#: still.
+#:   SO THE NUMBER IS BUILT ROUND THE HANDOVER AND NOT ROUND THE GOAL.
+#: The instant that matters is not where this leg ends, it is where the
+#: NEXT one is dispatched - ALIGN_M - P along the leg - and that instant
+#: now sits one wheelbase of straight running past the end of the arc.
+#: The goal itself is never reached at all: P is outside the 0.60 m
+#: checker, so the leg is superseded before nav2 could call it finished
+#: (see runs_to_its_goal, and _selftest pins the inequality).
+#:   THE FIELD RESULT, MEASURED AND NOT RULED ON (run 16, wave G1-C7,
+#: 2026-09-02). This constant does what it was built to do and it costs
+#: something the ruling did not price, and both halves are recorded here
+#: because the next wave needs both.
+#:   WHAT IT DELIVERS: 5 of 5 transits opened by an alignment leg were
+#: dispatched WITH THE TRUCK MOVING, v = -0.269 to -0.311 m/s, and the
+#: two off a straight ring run went out at turn = -0.042 and -0.084 rad.
+#: Run 15's same legs went out from a standstill at turn 0.78 to 1.56.
+#: The handover-in-motion is real, it is on the adapter's own leg line,
+#: and 9 of 9 preemptions were accepted by nav2.
+#:   WHAT IT COSTS: 3 of 8 alignment legs never closed. All three died
+#: on the closing watchdog at a right-angle turn with `best` equal to
+#: ALIGN_M itself - 4.55 m off the S1 mouth, 4.73 m off the NW ring
+#: corner, 4.26 m off (0, -10) - and the body twist FLIPPED SIGN 14
+#: times in 30 s on the first and 6 on the second. That is not a
+#: planner refusal (Smac answered) and it is not a creep (0 plateaus):
+#: it is the TWO-SENSE TIE this file already names at FLIP_ABOVE_RAD,
+#: reached because the goal is now far enough that both senses cost
+#: about the same, with nothing holding a choice across replans since
+#: AMENDMENTS 5 stripped DirectionStablePath. D12's original 2.75 m
+#: bought its way out of that by being SHORT - "short enough that the
+#: quarter turn is the ONLY thing in the plan" - and run 15 closed 13
+#: of 13 on it.
+#:   SO THE TWO RULINGS MEET HERE AND THE OWNER OWNS THE MEETING.
+#: AMENDMENTS 8 requires the handover to sit past the arc, which
+#: requires ALIGN_M >= arc + P + straighten; AMENDMENTS 5 removed the
+#: node that held a driving sense across replans. Nothing inside this
+#: file can satisfy both. The session that measured it kept every byte:
+#: m6_ver2/logs/run16-c7-session (READING.txt, the C7 addendum, and the
+#: body-twist sign runs). NOTHING IS QUIETLY TUNED AROUND IT.
+ALIGN_M = QUARTER_ARC_M + PREEMPT_AT_M + STRAIGHTEN_M
 
 #: THE LENGTH ABOVE WHICH A LEG ENTERED OFF A TURN IS SPLIT, and it is
 #: ARITHMETIC AND NOT A TUNING KNOB. Split at ALIGN_M, the remainder is
@@ -198,6 +286,16 @@ ALIGN_M = 2.75
 #: this threshold too - the rule does not claim 7 m was safe, only that
 #: the two which were not are covered and that no leg is split into
 #: pieces this file would then throw away.
+#:   AND IT FOLLOWED ALIGN_M FROM 4.25 TO 6.01 (AMENDMENTS 8), which
+#: closes a band, and the band is NAMED because it is a behaviour
+#: change: on this floor the only chunks between the two thresholds are
+#: the eight 6.00 m hops between two adjacent pick bays on one ring leg
+#: (S1<->S2, S3<->S4, S5<->S6, S7<->S8). Those used to be split; they
+#: are now driven whole. That is not a loss. Split, the 6.00 m hop was
+#: an alignment leg that STOPPED 2.75 m along - by the measurement
+#: above, mid-arc - followed by a 3.25 m transit dispatched from that
+#: skewed standstill, which is precisely run-15's fatal shape. Whole,
+#: it is one goal from the mouth stop, handed over at P into the bay.
 SPLIT_ABOVE_M = ALIGN_M + PREEMPT_AT_M
 
 #: HOW STRAIGHT "STRAIGHT ON" IS. The waypoint graph's own turns are all
@@ -377,9 +475,10 @@ def controller_for(klass):
 
 #: LEG CLASSES THAT ARE DRIVEN TO THEIR OWN GOAL rather than handed
 #: over at P. It is a tuple and not a bare comparison because the day a
-#: second class earns a stop, the place to say so is here and not
-#: inside an `if`. See runs_to_its_goal() for the measurement.
-DRIVEN_TO_ITS_GOAL = (SPUR_EXIT, ALIGN)
+#: class earns or loses a stop, the place to say so is here and not
+#: inside an `if` - and ALIGN has now done both (AMENDMENTS 8). See
+#: runs_to_its_goal() for both measurements.
+DRIVEN_TO_ITS_GOAL = (SPUR_EXIT,)
 
 
 def runs_to_its_goal(leg):
@@ -438,15 +537,44 @@ def runs_to_its_goal(leg):
     non-final leg and defect D9's branch starts the next one from a
     standstill - where the direction hold accepts every plan.
 
-    THE ALIGNMENT LEG, and that is DEFECT D12 (run 12, 2026-09-02) -
-    the same sentence one manoeuvre later. An alignment leg exists so
-    that the quarter turn is FINISHED before the long goal is sent; hand
-    it over at P and the long goal arrives with 1.25 m of the turn still
-    to run, which is the state it was added to avoid. See _align_split.
+    AND THE ALIGNMENT LEG IS NOT ONE OF THEM, WHICH IS THE SECOND
+    MEASUREMENT (defect D12 continued; AMENDMENTS 8, run 15,
+    2026-09-03). D12 added the alignment leg and put it in this tuple on
+    the D10 argument - "the quarter turn must be FINISHED before the
+    long goal is sent, so the leg that turns must stop". Run 15 drove
+    thirteen of them, completed thirteen, and blocked twice STANDING
+    STILL:
+
+      adapter  align 6/8 end=(-2.75, -10.00) goal_yaw=+0.000
+                         truck_yaw=+1.583        -> COMPLETED
+      planner  GridBased plugin failed to plan from (-14.70, 20.34) to
+               (-10.14, 19.82): "exceeded maximum iterations"   x10
+      /auto/state BLOCKED "blocked: no progress - best 4.40 m, 30 s
+                           without closing"  truth [-2.71, -10.53,
+                                                    -0.90]
+
+    A STOP IS NOT AN ALIGNMENT. This leg's checker is the transit
+    tree's, 0.60 m and POSITION ONLY (TRANSIT_GOAL_CHECKER_M: a tricycle
+    cannot rotate in place, so no goal checker on this stack has an
+    opinion about heading). ALIGN_M was 2.75, so the earliest legal
+    completion sat 2.15 m along a leg whose first 1.96 m is the arc -
+    0.19 m of straight running - and "arrived" was therefore declarable
+    with the truck still coming round. Twice it was: 0.53 m off the
+    line at 0.90 rad of skew. The next leg was then planned from that
+    pose, 4.59 m over free paint, and Smac refused it ten times.
+      SO THE LEG STOPS BEING A STOP. ALIGN_M grew to arc + P +
+    straighten, and the leg hands over at P like any transit - which
+    means the handover happens one wheelbase of STRAIGHT running past
+    the end of the arc, with the truck MOVING and on the axis. The long
+    goal is never dispatched from a standstill at all, and because P is
+    outside the 0.60 m checker the alignment goal is superseded before
+    nav2 could ever declare it reached. Run-15's start pose is not
+    unlikely now; it is unconstructable.
 
     THE COST, STATED: one stop per undock, of about a second, at a
     corner a 3.815 m tricycle with a 1.25 m turning radius was going to
-    slow down for anyway.
+    slow down for anyway. It was two stops per turn before AMENDMENTS 8,
+    and the second one was the defect.
     """
     return leg.final or leg.klass in DRIVEN_TO_ITS_GOAL
 
@@ -623,12 +751,17 @@ def _align_split(chunks):
     sense to drive on every replan, because at a quarter turn both
     senses reach the goal (FLIP_ABOVE_RAD's own tie) and a goal 13 m
     away gives neither any advantage the other lacks.
-      SO THE GOAL IS ASKED TO DO ONE THING. A short goal 2.75 m along
+      SO THE GOAL IS ASKED TO DO ONE THING. A short goal ALIGN_M along
     the leg is reachable one way and awkward the other, so the sense is
     decided by geometry rather than by the third decimal place of a
-    replan; the truck drives it, STOPS on it (DRIVEN_TO_ITS_GOAL), and
-    the long goal is then sent to a truck already pointing along it -
-    turn about zero, one plan, no cusp.
+    replan, and the long goal is then sent to a truck already pointing
+    along it - turn about zero, one plan, no cusp.
+      AND IT IS SENT WITH THE TRUCK MOVING (AMENDMENTS 8). D12's first
+    cut had the alignment leg STOP on its goal, on D10's argument; run
+    15 measured that stop landing mid-arc against a position-only
+    0.60 m checker and killing the leg after it. ALIGN_M now covers arc
+    + P + a straightening length, so the hand-over at P is already past
+    the turn - see ALIGN_M and runs_to_its_goal.
 
     WHY "OFF A TURN" AND NOT "OFF A MOUTH". The second BLOCKED was at a
     ring corner with no bay in sight. Every boundary split_legs makes IS
@@ -649,37 +782,73 @@ def _align_split(chunks):
     out, aligned = [], set()
     for index, points in enumerate(chunks):
         final = index == len(chunks) - 1
-        head = None
+        head, at = None, None
         if index and classify(points, final) == TRANSIT:
-            head = _align_head(points)
+            head, at = _align_head(points)
         if head is None:
             out.append(list(points))
             continue
         aligned.add(len(out))
-        out.append([points[0], head])
-        out.append([head] + list(points[1:]))
+        out.append([tuple(p) for p in points[:at + 1]] + [head])
+        rest = [head] + [tuple(p) for p in points[at + 1:]]
+        if math.dist(rest[0], rest[1]) == 0.0:
+            # THE HEAD LANDED EXACTLY ON A VERTEX. Keeping both would
+            # hand the remainder a zero-length first segment, and a
+            # segment with no length has no heading (leg_yaw's refusal).
+            rest = rest[1:]
+        out.append(rest)
     return out, aligned
 
 
 def _align_head(points):
-    """The alignment goal on this chunk, or None if it earns no split.
+    """(the alignment goal on this chunk, the vertex index it follows).
 
-    ON THE LEG AND NOT BESIDE IT: the point is ALIGN_M along the chunk's
-    FIRST SEGMENT, so it is a point of the corridor the route already
-    committed to and never a pose this file invented. A first segment
-    shorter than ALIGN_M is left alone rather than walked round the
-    corner - a chunk is near-collinear by construction, so that case is
-    a chunk barely longer than the split itself, and putting the goal
-    past a vertex would put it on a heading that is not this leg's.
+    (None, None) when the chunk earns no split.
+
+    ON THE LEG AND NOT BESIDE IT: the point is ALIGN_M along the CHUNK'S
+    OWN POLYLINE, so it is a point of the corridor the route already
+    committed to and never a pose this file invented.
+
+    ALONG THE CHUNK AND NOT ALONG ITS FIRST SEGMENT, and AMENDMENTS 8 is
+    what forced the difference. The first cut of D12 refused to place
+    the head past the chunk's first VERTEX, on the argument that a goal
+    past a vertex would be on a heading that is not this leg's. With
+    ALIGN_M at 2.75 that refusal cost nothing, because route.py's ring
+    legs carry a node every 3.00 to 4.00 m ("the widest gap on either
+    leg is 4.00 m"). At 4.51 it would cost everything: 196 of this
+    floor's long chunks have a first segment shorter than that,
+    including all three that carried run-15's BLOCKEDs, and D12 would
+    have quietly stopped existing exactly where it was measured.
+      AND THE ARGUMENT IT REPLACES WAS ALREADY ANSWERED BY split_legs. A
+    chunk is near-collinear BY CONSTRUCTION - every vertex inside one
+    turns by at most COLLINEAR_RAD - so a point past one of its vertices
+    is a point of this leg on this leg's heading, to within the same 15
+    degrees this file already grants a truck's parking error. The
+    alignment leg keeps the vertices it walks over, so its own last
+    segment is a real segment of the granted corridor.
     """
     if leg_length_m(points) <= SPLIT_ABOVE_M:
-        return None
-    first = math.dist(points[0], points[1])
-    if first < ALIGN_M:
-        return None
-    scale = ALIGN_M / first
-    return (points[0][0] + (points[1][0] - points[0][0]) * scale,
-            points[0][1] + (points[1][1] - points[0][1]) * scale)
+        return None, None
+    walked = 0.0
+    for index in range(len(points) - 1):
+        first, second = points[index], points[index + 1]
+        step = math.dist(first, second)
+        if step <= 0.0:
+            continue
+        if walked + step >= ALIGN_M:
+            scale = (ALIGN_M - walked) / step
+            return (first[0] + (second[0] - first[0]) * scale,
+                    first[1] + (second[1] - first[1]) * scale), index
+        walked += step
+    # UNREACHABLE ON A CHUNK OVER THE THRESHOLD, and it is a refusal
+    # rather than a fall-through: SPLIT_ABOVE_M is ALIGN_M + P, so a
+    # chunk that got here is longer than ALIGN_M and the walk above
+    # cannot run out of polyline. If it ever does, the threshold and
+    # the walk have stopped agreeing and no goal is the honest answer.
+    raise Nav2LegsError(
+        "a chunk {:.3f} m long ran out of polyline {:.3f} m into it, "
+        "which SPLIT_ABOVE_M ({:.3f} m) says is impossible"
+        .format(leg_length_m(points), ALIGN_M, SPLIT_ABOVE_M))
 
 
 def classify(leg_points, final):
@@ -1045,6 +1214,23 @@ def _selftest():
                                          MPPI_GOAL_THRESHOLD_M),
           PREEMPT_AT_M > MPPI_GOAL_THRESHOLD_M)
 
+    check("the alignment goal is arc {:.2f} + P {:.2f} + straighten "
+          "{:.2f} = {:.2f} m, and the split follows at {:.2f} m"
+          .format(QUARTER_ARC_M, PREEMPT_AT_M, STRAIGHTEN_M, ALIGN_M,
+                  SPLIT_ABOVE_M),
+          abs(ALIGN_M - (QUARTER_ARC_M + PREEMPT_AT_M + STRAIGHTEN_M))
+          < 1e-12 and abs(SPLIT_ABOVE_M - (ALIGN_M + PREEMPT_AT_M))
+          < 1e-12)
+    check("the alignment leg hands over {:.2f} m past the END of its "
+          "quarter arc, so the long goal leaves a truck that is moving "
+          "and straight (AMENDMENTS 8)".format(STRAIGHTEN_M),
+          ALIGN_M - PREEMPT_AT_M - QUARTER_ARC_M > 0.0)
+    check("and nav2 can never call an alignment leg finished: P "
+          "({:.2f} m) is outside the transit checker ({:.2f} m), so the "
+          "leg is superseded first".format(PREEMPT_AT_M,
+                                           TRANSIT_GOAL_CHECKER_M),
+          PREEMPT_AT_M > TRANSIT_GOAL_CHECKER_M)
+
     feet = spur_feet()
     check("every one of the {} stations has exactly one spur foot on a "
           "ring leg".format(len(feet)),
@@ -1116,10 +1302,14 @@ def _selftest():
     check("the bay MOUTH is driven to and not handed over - the truck "
           "does not take a quarter turn at 0.3 m/s (D10)",
           runs_to_its_goal(out[0]) and runs_to_its_goal(out[-1]))
-    check("and neither is an ALIGNMENT leg, while every long ring leg "
-          "still hands over at P (D12)",
-          all(runs_to_its_goal(leg) is (leg.klass == ALIGN)
-              for leg in out[1:-1]))
+    check("and NOTHING between them stops - the alignment legs hand "
+          "over at P like the transits they open (AMENDMENTS 8)",
+          not any(runs_to_its_goal(leg) for leg in out[1:-1]))
+    check("so the only standstill a route can build is the bay mouth, "
+          "and the leg after it is never longer than ALIGN_M + P",
+          all(leg_length_m(out[index].points) <= SPLIT_ABOVE_M + 1e-9
+              for index in range(1, len(out))
+              if runs_to_its_goal(out[index - 1])))
     check("and nav2 itself objects to exactly one boundary, the bay's",
           [i for i in range(len(out) - 1)
            if not drives_through(out[i], out[i + 1])] == [len(out) - 2])

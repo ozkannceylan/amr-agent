@@ -26,6 +26,11 @@ def _plan(pose, station_id):
     return poly
 
 
+def _flat(points):
+    """[x0, y0, x1, y1, ...] - a point list pytest.approx can read."""
+    return [coordinate for point in points for coordinate in point]
+
+
 # ----------------------------------------------------------------------
 # the split
 # ----------------------------------------------------------------------
@@ -71,18 +76,22 @@ def test_s5_to_s9_splits_at_every_junction_turn():
     start = (7.0, 4.25)
     legs = nav2_legs.plan_legs(_plan(start, "S9"))
     a = nav2_legs.ALIGN_M
-    assert [leg.points[0] for leg in legs] == [
+    # APPROX AND NOT EQUALITY, since AMENDMENTS 8: two of these three
+    # heads are interpolated PAST a collinear vertex (the ring legs
+    # carry a node every 3.00-4.00 m and ALIGN_M is 4.51), so the
+    # arithmetic that places them is a walk and not one multiply.
+    assert _flat(leg.points[0] for leg in legs) == pytest.approx(_flat([
         (7.0, 4.25),
         (7.0, 10.0), (7.0 - a, 10.0),
         (0.0, 10.0), (0.0, 10.0 - a),
         (0.0, -10.0), (-a, -10.0),
-        (-17.0, -10.0)]
-    assert [leg.points[-1] for leg in legs] == [
+        (-17.0, -10.0)]))
+    assert _flat(leg.points[-1] for leg in legs) == pytest.approx(_flat([
         (7.0, 10.0),
         (7.0 - a, 10.0), (0.0, 10.0),
         (0.0, 10.0 - a), (0.0, -10.0),
         (-a, -10.0), (-17.0, -10.0),
-        (-17.0, -14.9)]
+        (-17.0, -14.9)]))
     assert [leg.klass for leg in legs] == [
         nav2_legs.SPUR_EXIT,
         nav2_legs.ALIGN, nav2_legs.TRANSIT,
@@ -349,23 +358,24 @@ def test_a_bay_mouth_is_not_handed_over_at_all_but_driven_to():
         0.01, nav2_legs.runs_to_its_goal(out[0]))
 
 
-def test_the_undock_route_is_driven_to_two_goals_and_preempts_between():
+def test_the_undock_route_stops_exactly_twice():
     """THE WHOLE ROUTE OUT OF A BAY, leg by leg.
 
-    The mouth is driven to (D10), every ALIGNMENT leg is driven to
-    (D12 - a turn handed over halfway is the defect), the bay at the far
-    end is driven to because it is final, and every LONG ring leg still
-    hands over at P, which is what legs were for.
+    The mouth is driven to (D10) and the bay at the far end is driven
+    to because it is final. NOTHING ELSE STOPS - AMENDMENTS 8 took the
+    alignment leg's stop away, because a leg that stops can stop in the
+    middle of its own turn and run 15 measured it doing exactly that.
+    Every other leg, alignment legs included, hands over at P.
     """
     legs = nav2_legs.plan_legs(route.plan_route((-13.0, 4.25), "S9"))
     driven = [nav2_legs.runs_to_its_goal(leg) for leg in legs]
     assert driven[0] is True                 # the mouth (D10)
     assert driven[-1] is True                # the bay (it is final)
+    assert driven.count(True) == 2, [leg.klass for leg in legs]
     for leg, stops in zip(legs, driven):
-        if leg.klass == nav2_legs.TRANSIT and not leg.final:
+        if leg.klass in (nav2_legs.TRANSIT, nav2_legs.ALIGN) \
+                and not leg.final:
             assert stops is False, leg.end
-        if leg.klass == nav2_legs.ALIGN:
-            assert stops is True, leg.end
     # AND THE LONG LEGS ARE STILL THE MAJORITY OF THE DRIVING: the
     # alignment legs cost ALIGN_M each and nothing else.
     handed = [leg for leg, stops in zip(legs, driven) if not stops]
@@ -1018,10 +1028,53 @@ def test_a_short_FINAL_leg_is_left_alone():
 # and a quarter turn round is a turn AND a transit, and SmacPlannerHybrid
 # re-decides the turn on every replan because both senses reach it. So a
 # long leg entered off a turn is opened by a SHORT on-ring goal: the
-# truck resolves the quarter turn against a goal it can see, stops on the
-# ring pointing along it (ALIGN is driven to its goal, like the spur
-# exit), and the long goal is then sent to a truck that is already
-# aligned - turn about zero, one sense, one plan.
+# truck resolves the quarter turn against a goal it can see and the long
+# goal is then sent to a truck that is already aligned - turn about zero,
+# one sense, one plan.
+#
+# ----------------------------------------------------------------------
+# AND THE SHORT GOAL WAS TOO SHORT, AND IT STOPPED ON IT - AMENDMENTS 8
+# (G1-C7 ruling, measured run 15, 2026-09-03)
+#
+# Run 15 drove thirteen alignment legs and completed thirteen. It also
+# blocked four times, and two of those were STANDING STILL when the
+# watchdog called them:
+#
+#   align 6/8 end=(-2.75, -10.00) goal_yaw=+0.000 truck_yaw=+1.583
+#                                              -> COMPLETED
+#   [WARN] f1.planner_server: GridBased plugin failed to plan from
+#          (-14.70, 20.34) to (-10.14, 19.82): "exceeded maximum
+#          iterations"                              x5, and x5 again
+#   /auto/state BLOCKED "blocked: no progress - best 4.40 m, 30 s
+#                        without closing"  truth [-2.7078, -10.5319,
+#                                                 -0.9048]
+#
+# THE MAP FRAME IS THE SAME TWO POSES. Through the committed
+# registration (world = (-17.079, 9.854) - map, the seed's own pi
+# rotation) the planner's start is world (-2.38, -10.49) and its goal is
+# world (-6.94, -9.97) - the alignment leg's own end at (-2.75, -10.00)
+# missed by 0.53 m and 0.90 rad, and then the 4.59 m transit after it,
+# planned from that pose over free paint, ten times refused.
+#
+# SO THE ALIGNMENT LEG COMPLETED IN THE MIDDLE OF ITS OWN TURN. Its
+# checker is the transit's 0.60 m box and it is POSITION ONLY - a
+# tricycle cannot rotate in place, so nothing in nav2 was ever going to
+# hold it to a heading - and ALIGN_M 2.75 less that box is 2.15 m, which
+# is barely over the quarter arc itself (pi/2 x 1.25 = 1.96 m). The
+# truck was declared arrived while it was still turning, stopped there
+# skewed and off the line, and handed the planner exactly the start pose
+# a 1.25 m-radius Hybrid-A* cannot close a short goal from.
+#
+# TWO CHANGES, AND THEY ARE ONE IDEA: the goal has to sit past the END
+# of the turn, and the leg must not stop on it.
+#   ALIGN_M = quarter arc + P + one straightening length, so the point
+# at which the leg HANDS OVER (P short of its goal) is already a
+# wheelbase of straight running past the arc.
+#   AND ALIGN LEAVES DRIVEN_TO_ITS_GOAL. It preempts at P like any
+# transit, so the long goal is dispatched from a MOVING, on-axis pose
+# and run-15's standing-start class cannot be built at all: the only
+# leg class that still stops mid-route is the spur exit, whose stop is
+# on the bay's own axis at a graph node (D10).
 # ----------------------------------------------------------------------
 
 def _drivable(start, station):
@@ -1053,16 +1106,99 @@ def test_the_align_class_is_in_the_table_and_runs_the_transit_tree():
             == nav2_legs.controller_for(nav2_legs.TRANSIT))
 
 
-def test_an_alignment_leg_is_driven_to_its_own_goal():
-    """Handing it over at P would hand the long goal to a truck still
-    in its turn, which is the whole defect. D10's rule, second class."""
-    assert nav2_legs.ALIGN in nav2_legs.DRIVEN_TO_ITS_GOAL
-    leg = nav2_legs.Leg(points=[(0.0, 0.0), (2.75, 0.0)], start=(0.0, 0.0),
-                        end=(2.75, 0.0), goal=(2.75, 0.0),
-                        klass=nav2_legs.ALIGN,
-                        controller="rpp", tree_key="nav.bt_xml_rpp",
-                        final=False)
-    assert nav2_legs.runs_to_its_goal(leg) is True
+def _align_leg(length=None):
+    """A bare ALIGN leg, for the class questions that need no route."""
+    length = nav2_legs.ALIGN_M if length is None else length
+    return nav2_legs.Leg(points=[(0.0, 0.0), (length, 0.0)],
+                         start=(0.0, 0.0), end=(length, 0.0),
+                         goal=(length, 0.0), klass=nav2_legs.ALIGN,
+                         controller="rpp", tree_key="nav.bt_xml_rpp",
+                         final=False)
+
+
+def test_an_alignment_leg_hands_over_in_motion_like_any_transit():
+    """AMENDMENTS 8. The align stop was the defect, not the fix.
+
+    Run 15 completed thirteen alignment legs and two of them completed
+    MID-TURN, against a position-only 0.60 m box, 0.53 m off the line
+    and 0.90 rad skew - and the transit dispatched from that standstill
+    was refused by Smac ten times over free paint. A leg that stops is
+    a leg that can stop in the wrong place; a leg that hands over at P
+    cannot, because at P it is still being driven.
+    """
+    assert nav2_legs.ALIGN not in nav2_legs.DRIVEN_TO_ITS_GOAL
+    assert nav2_legs.runs_to_its_goal(_align_leg()) is False
+    assert nav2_legs.should_preempt(
+        nav2_legs.PREEMPT_AT_M - 0.01,
+        nav2_legs.runs_to_its_goal(_align_leg())) is True
+
+
+def test_the_spur_exit_is_the_only_class_that_still_stops():
+    """D10 keeps its stop and it is now the ONLY one (AMENDMENTS 8).
+
+    Which matters for a reason the tuple cannot show on its own: a spur
+    exit stops ON THE BAY'S OWN AXIS at a graph node, having driven
+    5.75 m dead astern in a straight line. It is the one standstill
+    this file can build, and it is not a pose in the middle of a turn.
+    """
+    assert nav2_legs.DRIVEN_TO_ITS_GOAL == (nav2_legs.SPUR_EXIT,)
+
+
+def test_the_alignment_length_is_an_arc_a_handover_and_a_straightening():
+    """ARITHMETIC, AND EVERY TERM IS SOMEBODY ELSE'S MEASUREMENT.
+
+    quarter arc  pi/2 x 1.25 m, the model's measured minimum turning
+                 radius (m5_ver3/config.yaml nav.min_radius_m), through
+                 the right angle every turn on this floor is;
+    P            because the leg HANDS OVER P short of its own goal
+                 now, so P is inside the leg and not after it;
+    straighten   one wheelbase (m5_ver3/config.yaml vehicle.wheelbase_m)
+                 of straight running before the handover.
+    """
+    assert nav2_legs.MIN_TURN_RADIUS_M == 1.25
+    assert nav2_legs.STRAIGHTEN_M == 1.05
+    assert nav2_legs.QUARTER_ARC_M == pytest.approx(
+        math.pi / 2.0 * nav2_legs.MIN_TURN_RADIUS_M)
+    assert nav2_legs.QUARTER_ARC_M == pytest.approx(1.9635, abs=1e-4)
+    assert nav2_legs.ALIGN_M == pytest.approx(
+        nav2_legs.QUARTER_ARC_M + nav2_legs.PREEMPT_AT_M
+        + nav2_legs.STRAIGHTEN_M)
+    assert nav2_legs.ALIGN_M == pytest.approx(4.5135, abs=1e-4)
+    # AND THE OLD NUMBER'S OWN MARGIN IS WHAT IT REPLACES. nav2 may
+    # declare the leg finished 0.60 m short of the goal, so at 2.75 the
+    # earliest legal completion was 2.15 m along a leg whose first
+    # 1.96 m IS the arc: 0.19 m of straight running, under a fifth of a
+    # wheelbase. Run 15 was declared arrived inside that twice, 0.53 m
+    # off the line at 0.90 rad of skew.
+    old = 2.75 - nav2_legs.TRANSIT_GOAL_CHECKER_M - nav2_legs.QUARTER_ARC_M
+    assert 0.0 < old < nav2_legs.STRAIGHTEN_M / 5.0
+    assert (nav2_legs.ALIGN_M - nav2_legs.PREEMPT_AT_M
+            - nav2_legs.QUARTER_ARC_M) == pytest.approx(
+                nav2_legs.STRAIGHTEN_M)
+
+
+def test_the_handover_happens_a_straightening_past_the_end_of_the_turn():
+    """THE PROPERTY THE NUMBER EXISTS FOR, stated without the number.
+
+    The long goal leaves when the truck is P from the alignment goal.
+    That instant has to be past the arc, and past it by enough straight
+    running that the body is ALONG the axis and not merely on it.
+    """
+    handover = nav2_legs.ALIGN_M - nav2_legs.PREEMPT_AT_M
+    assert handover > nav2_legs.QUARTER_ARC_M
+    assert handover - nav2_legs.QUARTER_ARC_M == pytest.approx(
+        nav2_legs.STRAIGHTEN_M)
+
+
+def test_nav2_can_never_declare_an_alignment_leg_reached():
+    """Run 15's own mechanism, closed by arithmetic.
+
+    The align leg runs the transit tree, whose FollowPath names the
+    0.60 m `general_goal_checker`. P is outside that box, so the leg is
+    superseded before nav2 could ever call it finished - which is what
+    makes the mid-turn completion unconstructable rather than unlikely.
+    """
+    assert nav2_legs.PREEMPT_AT_M > nav2_legs.TRANSIT_GOAL_CHECKER_M
 
 
 def test_the_split_length_is_derived_from_the_preempt_point():
@@ -1111,6 +1247,138 @@ def test_the_alignment_leg_and_its_remainder_are_the_original_leg():
         # collinear by construction, so the two add up to the one
         assert whole == pytest.approx(
             math.dist(head.start, tail.end), abs=1e-6)
+
+
+#: EVERY POSE ON THIS FLOOR A ROUTE CAN START FROM: the twelve bays and
+#: the four spawn nodes status_contract declares. The sweeps below are
+#: over all of them because the property they pin is about the SHAPE of
+#: a leg queue, and one route cannot show that.
+ALL_STARTS = tuple(sorted(
+    [(float(s["x"]), float(s["y"])) for s in STATIONS.values()]
+    + [(-17.0, 10.0), (-10.0, 10.0), (10.0, 10.0), (17.0, 10.0)]))
+
+
+def _every_queue():
+    """(start, station, legs) for every route this floor can plan."""
+    for start in ALL_STARTS:
+        for station in sorted(STATIONS):
+            poly = _drivable(start, station)
+            if poly is None:
+                continue
+            yield start, station, nav2_legs.plan_legs(poly)
+
+
+def test_no_standing_start_is_ever_handed_a_long_goal():
+    """THE PIN AMENDMENTS 8 EXISTS FOR, over every route on the floor.
+
+    Run 15's fatal shape was: a leg completes, the truck STOPS wherever
+    that completion caught it, and the next goal - 4.59 m away and a
+    quarter turn round - is planned from there. Smac refused it ten
+    times.
+
+    With ALIGN out of DRIVEN_TO_ITS_GOAL there is exactly one class
+    left that hands a standstill to another leg, and it is the spur
+    exit. So two things have to hold everywhere:
+
+      * the leg BEFORE any standstill is a spur exit and never an
+        alignment leg - a stop can only happen at a bay mouth, on the
+        bay's own axis, at a graph node;
+      * the leg AFTER it is never longer than ALIGN_M + P. A standing
+        truck is never shown a goal further than the alignment leg
+        would have been, whether it got one or not.
+    """
+    for start, station, legs in _every_queue():
+        for index in range(1, len(legs)):
+            if not nav2_legs.runs_to_its_goal(legs[index - 1]):
+                continue
+            where = "{} -> {} leg {}".format(start, station, index)
+            assert legs[index - 1].klass == nav2_legs.SPUR_EXIT, where
+            assert nav2_legs.leg_length_m(legs[index].points) \
+                <= nav2_legs.SPLIT_ABOVE_M + 1e-9, where
+
+
+def test_the_only_legs_driven_to_their_goals_are_the_mouth_and_the_bay():
+    """The other half of the same sentence: no leg in the MIDDLE of a
+    route stops except a spur exit, and the last one always does."""
+    for start, station, legs in _every_queue():
+        where = "{} -> {}".format(start, station)
+        assert nav2_legs.runs_to_its_goal(legs[-1]) is True, where
+        for leg in legs[:-1]:
+            assert nav2_legs.runs_to_its_goal(leg) is (
+                leg.klass == nav2_legs.SPUR_EXIT), where
+
+
+def test_the_alignment_goal_may_sit_past_a_collinear_vertex():
+    """WHY THE HEAD IS WALKED ALONG THE CHUNK AND NOT ALONG SEGMENT ONE.
+
+    route.py draws the ring legs with a node every 3.00 to 4.00 m ("the
+    widest gap on either leg is 4.00 m"), and ALIGN_M is 4.51. A rule
+    that refused to place the head past the chunk's first VERTEX would
+    therefore refuse it on every east-west ring chunk on this floor -
+    196 of them, including all three that carried run-15's BLOCKEDs -
+    and D12 would quietly stop existing where it was measured.
+      A chunk is near-collinear by construction (COLLINEAR_RAD), so a
+    point past one of its vertices is still a point of this leg on this
+    leg's heading. Walking is therefore free; refusing is not.
+    """
+    legs = nav2_legs.plan_legs(_plan((-13.0, 4.25), "S4"))
+    align = [leg for leg in legs if leg.klass == nav2_legs.ALIGN][0]
+    assert math.dist(align.points[0], align.points[1]) == pytest.approx(3.0)
+    assert math.dist(align.points[0], align.points[1]) < nav2_legs.ALIGN_M
+    assert align.points[1] == (-10.0, 10.0)         # the vertex, kept
+    assert align.end == pytest.approx((-13.0 + nav2_legs.ALIGN_M, 10.0))
+    assert nav2_legs.leg_length_m(align.points) == pytest.approx(
+        nav2_legs.ALIGN_M)
+    # and the head is ON the leg: same heading as the segment it opened
+    assert abs(follower.norm_ang(
+        math.atan2(align.end[1] - align.points[1][1],
+                   align.end[0] - align.points[1][0])
+        - math.atan2(align.points[1][1] - align.points[0][1],
+                     align.points[1][0] - align.points[0][0]))) < 1e-12
+
+
+def test_the_split_still_reaches_every_long_chunk_on_the_floor():
+    """The sweep behind the sentence above: every chunk over the
+    threshold gets its alignment leg, whatever its node spacing."""
+    seen = 0
+    for start, station, legs in _every_queue():
+        for index in range(1, len(legs)):
+            leg = legs[index]
+            if leg.klass != nav2_legs.TRANSIT:
+                continue
+            if legs[index - 1].klass == nav2_legs.ALIGN:
+                seen += 1
+                continue
+            # NOT OPENED BY AN ALIGNMENT LEG - so it has to be a chunk
+            # the threshold left whole, which is the only other way a
+            # transit is allowed to exist off a turn.
+            assert nav2_legs.leg_length_m(leg.points) \
+                <= nav2_legs.SPLIT_ABOVE_M + 1e-9, (start, station, index)
+    assert seen > 100, seen
+
+
+def test_a_mouth_to_mouth_hop_is_now_its_own_alignment_leg():
+    """THE BAND THE NEW THRESHOLD CLOSES, NAMED RATHER THAN HIDDEN.
+
+    SPLIT_ABOVE_M followed ALIGN_M from 4.25 m to 6.01 m, so chunks in
+    between stopped being split. On this floor that band holds exactly
+    one shape: the 6.00 m hop between two adjacent pick bays on one
+    ring leg (S1<->S2, S3<->S4, S5<->S6, S7<->S8), eight chunks in all.
+
+    It is NOT a regression, and the arithmetic says why. Under 2.75 the
+    6.00 m chunk was split into an alignment leg that STOPPED 2.75 m
+    along - mid-arc, by the measurement above - and a 3.25 m transit
+    dispatched from that skewed standstill: run-15's own fatal shape.
+    Now it is one goal, 6.00 m, driven from the mouth stop and handed
+    over at P into the bay. One decision instead of two.
+    """
+    legs = nav2_legs.plan_legs(_plan((-13.0, 4.25), "S2"))
+    assert [leg.klass for leg in legs] == [
+        nav2_legs.SPUR_EXIT, nav2_legs.TRANSIT, nav2_legs.STATION_SPUR]
+    hop = legs[1]
+    assert nav2_legs.leg_length_m(hop.points) == pytest.approx(6.0)
+    assert nav2_legs.leg_length_m(hop.points) <= nav2_legs.SPLIT_ABOVE_M
+    assert nav2_legs.runs_to_its_goal(hop) is False
 
 
 def test_a_leg_at_the_head_of_a_route_is_never_split():
