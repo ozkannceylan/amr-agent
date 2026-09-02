@@ -4,9 +4,20 @@ does the operator get told?
 
     python3 m6_ver2/nav2_adapter/nav2_watch.py --selftest
 
-NO ROS IN THIS FILE. It is a rule and a table; the shell feeds it the
-believed distance on every tick and hands the resulting note to
+NO ROS IN THIS FILE. It is a rule, a ruler and a table; the shell feeds
+it the believed POSE on every tick and hands the resulting note to
 nav2_state.block().
+
+THE RULE IS ONE AND THE RULER IS PER LEG (defect D16). "Still getting
+closer" is one question, but what CLOSER means is not the same on every
+class this adapter drives: a manoeuvre is a goal in front of the truck
+and a ring chain is forty metres of corridor that turns away from its
+own end before it comes back. Feeding the second one the first one's
+ruler cancelled four consecutive orders in run18-c8-session-c while the
+truck drove them correctly at 0.30 m/s. So a leg is dispatched with a
+`ClosingMetric` and the watch carries it - and because a distance on the
+wire that does not say what it is a distance OF is not a WHY, the note
+names the ruler whenever it is not the ordinary one.
 
 THE QUESTION nav2's OWN PROGRESS CHECKER CANNOT ASK.
 `nav2_controller::SimpleProgressChecker` is satisfied by
@@ -42,6 +53,8 @@ import math
 import sys
 
 import _donors                                            # noqa: F401
+
+import nav2_path
 
 
 class Nav2WatchError(ValueError):
@@ -96,6 +109,66 @@ CHAIN_REFUSED_NOTE = ("blocked: the granted polyline cannot be driven as "
                       "a path - see the adapter log for which corner")
 
 
+#: ONE WAY OF ASKING "HOW FAR IS THIS LEG FROM DONE", with its name on
+#: it. `of` takes an (x, y) BELIEF and returns metres; `name` is what
+#: the adapter's log calls the number and what METRIC_PHRASE looks up
+#: when the note has to say which ruler produced it.
+ClosingMetric = collections.namedtuple("ClosingMetric", "name of")
+
+#: WHAT EACH RULER IS CALLED IN A NOTE, AND WHY ONE OF THEM IS SILENT.
+#: `/auto/state.note` is byte-pinned contract quoted verbatim into a VDA
+#: pathBlocked errorDescription, so the ordinary case - a straight line
+#: to a goal - keeps the sentence it has always had. A chain's number is
+#: measured along forty metres of path and means something else
+#: entirely, so it says so. A ruler this table does not know cannot
+#: produce a note at all: an operator reading a distance has to know
+#: what it is a distance OF.
+METRIC_PHRASE = {"dist": "", "remain": " along the chain"}
+
+
+def straight_metric(end_xy):
+    """The ruler every NavigateToPose leg closes on: the line to its end.
+
+    IT IS THE LEG'S END AND NOT ITS GOAL (D13). The message aims
+    ARRIVE_BIAS_M past the station point; the leg still ENDS on the
+    point, and every distance the adapter and the fleet measure is to
+    that.
+    """
+    end = (float(end_xy[0]), float(end_xy[1]))
+    return ClosingMetric(name="dist", of=lambda xy: math.dist(xy, end))
+
+
+def chain_metric(poses):
+    """The ruler a RING_CHAIN closes on: what is LEFT of its own path.
+
+    DEFECT D16, MEASURED (run18-c8-session-c, 2026-09-02). A chain
+    turns away from its own end by construction - the S1 -> S4 grant
+    leaves the bay NORTHWARD up the spur while S4's spur foot is fifteen
+    metres SOUTH - so the straight line to that end grew from 15.69 m to
+    20.93 m over the first third of a leg the truck was driving
+    perfectly at 0.30 m/s, with the fleet's own node counter advancing
+    10 -> 9 -> 8 underneath. The watchdog called it a stall and
+    cancelled four consecutive orders.
+      The rule was never wrong. It was handed a ruler that does not
+    measure this shape of leg, so the leg now carries its own: project
+    the belief onto the path that was sent and read the arclength to the
+    end of it. On the same thirty seconds this falls 43.90 -> 36.63 m
+    without one step the wrong way.
+
+    THE TABLE IS PREPARED ONCE, HERE. The shell asks this twenty times a
+    second against four hundred poses and the cumulative arclength does
+    not change while the leg runs.
+    """
+    tail = nav2_path.cumulative_from_end(poses)
+    if len(tail) < 2:
+        raise nav2_path.Nav2PathError(
+            "a chain of {} pose(s) is not a path, and a leg cannot be "
+            "watched for closing along one".format(len(tail)))
+    return ClosingMetric(
+        name="remain",
+        of=lambda xy: nav2_path.remaining_along(xy, poses, tail_m=tail))
+
+
 class ClosingWatch(object):
     """Is this leg still getting CLOSER to its goal?
 
@@ -123,11 +196,20 @@ class ClosingWatch(object):
     are a property of the floor and the vehicle (m5v3 runs 0.50 m in
     30 s), and a default in a library is a number that gets used by
     accident and then measured as if it had been chosen.
+
+    THE RULE IS ONE AND THE RULER IS PER LEG (D16). `step` is the rule
+    and it is a port of drive_goal's, pinned sample for sample against
+    it; `metric` is the thing that turns a believed POSE into the
+    number `step` is fed, and a chain's is not a manoeuvre's. It is
+    optional so that the rule stays constructible from two numbers -
+    which is what the port test needs - and `measure` refuses BY NAME
+    rather than guessing when a shell forgets to hand one over.
     """
 
-    def __init__(self, required_closing_m, allowance_s):
+    def __init__(self, required_closing_m, allowance_s, metric=None):
         self.required_closing_m = float(required_closing_m)
         self.allowance_s = float(allowance_s)
+        self.metric = metric
         if not (math.isfinite(self.required_closing_m)
                 and self.required_closing_m > 0.0):
             raise Nav2WatchError(
@@ -141,6 +223,27 @@ class ClosingWatch(object):
                 .format(allowance_s))
         self.mark = None
         self.t_mark = None
+
+    def measure(self, xy):
+        """This leg's own ruler, read at a believed position."""
+        if self.metric is None:
+            raise Nav2WatchError(
+                "this watch has no ruler: a leg is dispatched with the "
+                "metric it closes on (nav2_watch.straight_metric for a "
+                "manoeuvre, nav2_watch.chain_metric for a ring chain) "
+                "and measuring without one would be a verdict about a "
+                "number nobody chose")
+        return float(self.metric.of(xy))
+
+    def observe(self, t, xy):
+        """`(distance, verdict)` - the ruler read and the rule stepped.
+
+        ONE DOOR FOR THE SHELL, so the number the watchdog judged is the
+        same number the adapter's log prints on the same tick. Two calls
+        would be two readings of a belief that moves between them.
+        """
+        distance = self.measure(xy)
+        return distance, self.step(t, distance)
 
     def step(self, t, distance):
         """None while it is still closing; a `Stalled` when it is not."""
@@ -188,10 +291,27 @@ def no_progress_at(samples, required_closing_m, allowance_s):
 
 # ------------------------------ the notes ------------------------------
 
-def blocked_note_no_progress(stalled):
-    """The adapter's own watchdog fired. It names itself and its numbers."""
-    return ("blocked: no progress - best {:.2f} m, {:.0f} s without "
-            "closing".format(stalled.mark, stalled.since_s))
+def blocked_note_no_progress(stalled, metric=None):
+    """The adapter's own watchdog fired. It names itself and its numbers.
+
+    AND SINCE D16 IT NAMES THE RULER TOO, when the ruler is not the
+    ordinary one. "best 36.64 m" measured along a forty-metre chain and
+    "best 36.64 m" measured across a room are different facts about a
+    truck, and the note is the only place a dispatcher ever sees either.
+    A straight line is the ordinary case and its bytes do not move.
+    """
+    if metric is None:
+        phrase = METRIC_PHRASE["dist"]
+    elif metric.name in METRIC_PHRASE:
+        phrase = METRIC_PHRASE[metric.name]
+    else:
+        raise Nav2WatchError(
+            "the watchdog was measuring with a {!r} ruler, which this "
+            "file has no sentence for. A distance on the wire that does "
+            "not say what it is a distance OF is not a WHY"
+            .format(metric.name))
+    return ("blocked: no progress - best {:.2f} m{}, {:.0f} s without "
+            "closing".format(stalled.mark, phrase, stalled.since_s))
 
 
 def blocked_note_for_error(error_code):
@@ -329,6 +449,37 @@ def _selftest():
     check("the no-progress note names the instrument and the numbers",
           blocked_note_no_progress(
               Stalled(41.0, 2.93, 2.91, 30.4))
+          == "blocked: no progress - best 2.91 m, 30 s without closing")
+
+    # D16: ONE RULE, TWO RULERS, AND THE TRUCK IS DRIVING PERFECTLY.
+    # This corridor is run-18's chain in miniature: it leaves NORTH for
+    # an end that lies SOUTH, and the walk is forty seconds at the
+    # vehicle's own 0.30 m/s envelope, on the corridor the whole way.
+    away = [(0.0, 0.0), (0.0, 20.0), (20.0, 20.0), (20.0, -20.0)]
+    straight = straight_metric((20.0, -20.0))
+    along = chain_metric(away)
+    walk = [(float(t), (0.0, 0.30 * t)) for t in range(0, 41)]
+    check("the straight ruler KILLS a leg driven correctly at 0.30 m/s",
+          no_progress_at([(t, straight.of(xy)) for t, xy in walk],
+                         0.50, 30.0) is not None)
+    check("and the chain's own ruler does not",
+          no_progress_at([(t, along.of(xy)) for t, xy in walk],
+                         0.50, 30.0) is None)
+    check("the chain ruler reads the whole path at its head and nothing "
+          "at its end",
+          abs(along.of((0.0, 0.0)) - 80.0) < 1e-9
+          and abs(along.of((20.0, -20.0))) < 1e-9)
+    check("a watch measures and steps in one call",
+          ClosingWatch(0.50, 30.0,
+                       metric=straight_metric((0.0, 0.0))).observe(
+              0.0, (3.0, 4.0)) == (5.0, None))
+    check("the note says WHICH ruler when it is not the ordinary one",
+          blocked_note_no_progress(Stalled(41.0, 36.70, 36.64, 30.4),
+                                   along)
+          == "blocked: no progress - best 36.64 m along the chain, "
+             "30 s without closing"
+          and blocked_note_no_progress(Stalled(41.0, 2.93, 2.91, 30.4),
+                                       straight)
           == "blocked: no progress - best 2.91 m, 30 s without closing")
     check("a 2xx is the PLANNER, and 205 is the costmap under the "
           "footprint",

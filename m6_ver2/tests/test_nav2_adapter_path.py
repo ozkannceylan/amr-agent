@@ -546,3 +546,254 @@ def test_a_trim_in_front_of_a_reversal_does_not_refuse_the_order():
     assert built.poses[0][:2] == pytest.approx((-13.0, 4.25))
     assert built.corners == 1
     assert nav2_path.cusp_at(built.poses) is None
+
+
+# ----------------------------------------------------------------------
+# DEFECT D16: A CHAIN LEG CLOSES ALONG ITS OWN PATH, NOT ACROSS THE ROOM
+#
+# Measured, run18-c8-session-c (2026-09-02). A RING_CHAIN turns away
+# from its own end by construction - the S1 -> S4 grant leaves the bay
+# NORTHWARD up the spur while S4's spur foot is fifteen metres SOUTH -
+# so the straight-line distance the ClosingWatch was fed GROWS for the
+# first third of the leg. Four consecutive orders died on it:
+#
+#   /auto/state  BLOCKED  "blocked: no progress - best 15.69 m, 30 s
+#                without closing"                            x 4
+#   truth        0.30 m/s the whole time, wheels turning
+#   fleet        nodesLeft 10 -> 9 -> 8, the truck passing its own
+#                waypoints while the watchdog called it stopped
+#
+# THE REMAINING ARCLENGTH IS THE HONEST RULER. Project the believed
+# pose onto the path the truck was given and measure what is LEFT of
+# it: it falls for a truck driving the path correctly, whatever
+# direction the goal happens to lie in.
+# ----------------------------------------------------------------------
+
+#: run-18's own leg-2 chain: the route vda_agent released for S1 -> S4,
+#: head pose and all, exactly as it appears on the wire at 13:23:07.
+RUN18_ROUTE = [(-12.999499560306049, 4.493182698768322),
+               (-13.0, 4.25), (-13.0, 10.0), (-10.0, 10.0), (-7.0, 10.0),
+               (-3.5, 10.0), (0.0, 10.0), (0.0, 0.0), (0.0, -10.0),
+               (-3.5, -10.0), (-7.0, -10.0), (-7.0, -4.25)]
+
+#: (t seconds from dispatch, believed x, believed y) off run-18's
+#: /f1/est/odom, from the FollowPath dispatch at 13:23:07 to the
+#: watchdog's kill at 13:23:37. The clock is the watchdog's own -
+#: `clock_s` is monotonic wall time and not sim time - so the thirty
+#: seconds here are the thirty seconds the note quoted.
+RUN18_KILL_WINDOW = [
+    (0.00, -12.9995, 4.4932), (1.05, -13.0002, 4.5475),
+    (2.17, -13.0031, 4.8560), (3.20, -13.0069, 5.1288),
+    (4.25, -13.0085, 5.4222), (5.33, -13.0089, 5.7081),
+    (6.41, -13.0022, 6.0326), (7.44, -12.9894, 6.3010),
+    (8.51, -12.9822, 6.6010), (9.62, -12.9739, 6.8914),
+    (10.65, -12.9705, 7.1877), (11.71, -12.9705, 7.4643),
+    (12.82, -12.9750, 7.8016), (13.85, -12.9825, 8.0947),
+    (14.90, -13.0060, 8.3786), (15.97, -13.0407, 8.6715),
+    (17.06, -13.0743, 8.9462), (18.11, -13.0959, 9.1797),
+    (19.20, -13.0855, 9.4067), (20.27, -13.0394, 9.6309),
+    (21.31, -12.9474, 9.8344), (22.38, -12.8085, 10.0057),
+    (23.48, -12.6253, 10.1464), (24.51, -12.3728, 10.2322),
+    (25.58, -12.0715, 10.2269), (26.64, -11.7708, 10.1604),
+    (27.69, -11.4903, 10.0769), (28.73, -11.2294, 9.9969),
+    (29.81, -10.9416, 9.9238), (30.88, -10.7355, 9.8883),
+    (31.71, -10.7046, 9.8837),
+]
+
+
+def _run18_chain_path():
+    """The 44.14 m path run-18's adapter actually sent, rebuilt here."""
+    legs = nav2_legs.plan_legs(RUN18_ROUTE)
+    chain = legs[0]
+    assert chain.klass == nav2_legs.RING_CHAIN
+    return chain, nav2_legs.chain_path(
+        chain, current_yaw=-1.567, start_xy=(-12.9995, 4.4932))
+
+
+def test_the_fixture_is_the_path_run18_logged():
+    """The adapter's own chain table, reproduced to the centimetre.
+
+      leg 1/2 ring chain follow_path end=(-7.00, -10.00)
+      head=(-13.00, 4.25) len=44.14 poses=444 corners=3 dropped=1
+      sense=forks-first
+    """
+    chain, built = _run18_chain_path()
+    assert chain.end == (-7.0, -10.0)
+    assert built.length_m == pytest.approx(44.14, abs=0.005)
+    assert (len(built.poses), built.corners, built.dropped) == (444, 3, 1)
+    assert built.flipped is True
+
+
+# ----------------------------------------------------------------------
+# the projection, said once for three readers
+# ----------------------------------------------------------------------
+
+def test_the_projection_carries_where_as_well_as_how_far():
+    where = nav2_path.project_onto((3.0, 1.0),
+                                   [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)])
+    assert where.index == 0
+    assert where.scale == pytest.approx(0.3)
+    assert where.foot == pytest.approx((3.0, 0.0))
+    assert where.offset_m == pytest.approx(1.0)
+
+
+def test_the_projection_clamps_to_both_ends_of_the_corridor():
+    poly = [(0.0, 0.0), (10.0, 0.0)]
+    assert nav2_path.project_onto((-4.0, 3.0), poly).foot == \
+        pytest.approx((0.0, 0.0))
+    assert nav2_path.project_onto((14.0, 3.0), poly).foot == \
+        pytest.approx((10.0, 0.0))
+
+
+def test_the_offset_is_the_projection_and_not_a_second_answer():
+    """offset_from_polyline and project_onto are one measurement."""
+    poly = _plan(F1_SPAWN, "S4")
+    for point in ((-13.0, 7.0), (-11.4, 10.4), (0.3, -2.0), (99.0, 99.0)):
+        assert nav2_path.offset_from_polyline(point, poly) == \
+            pytest.approx(nav2_path.project_onto(point, poly).offset_m)
+
+
+def test_a_corridor_with_no_segment_in_it_is_still_answered():
+    """A degenerate polyline is not a crash - the head is all there is."""
+    where = nav2_path.project_onto((1.0, 0.0), [(0.0, 0.0), (0.0, 0.0)])
+    assert where.foot == pytest.approx((0.0, 0.0))
+    assert where.offset_m == pytest.approx(1.0)
+    assert nav2_path.project_onto((1.0, 0.0), []) is None
+
+
+# ----------------------------------------------------------------------
+# the arclength itself
+# ----------------------------------------------------------------------
+
+def test_the_cumulative_table_counts_back_from_the_end():
+    tail = nav2_path.cumulative_from_end(
+        [(0.0, 0.0), (3.0, 0.0), (3.0, 4.0)])
+    assert list(tail) == pytest.approx([7.0, 4.0, 0.0])
+
+
+def test_remaining_is_the_whole_length_at_the_head_and_zero_at_the_tail():
+    poly = [(0.0, 0.0), (3.0, 0.0), (3.0, 4.0)]
+    assert nav2_path.remaining_along((0.0, 0.0), poly) == pytest.approx(7.0)
+    assert nav2_path.remaining_along((3.0, 4.0), poly) == pytest.approx(0.0)
+    assert nav2_path.remaining_along((3.0, 2.0), poly) == pytest.approx(2.0)
+
+
+def test_remaining_is_measured_off_the_foot_and_not_off_the_truck():
+    """A truck half a metre off its corridor has not driven half a metre."""
+    poly = [(0.0, 0.0), (10.0, 0.0)]
+    assert nav2_path.remaining_along((4.0, 0.5), poly) == pytest.approx(6.0)
+    assert nav2_path.remaining_along((-2.0, 0.0), poly) == pytest.approx(10.0)
+    assert nav2_path.remaining_along((12.0, 0.0), poly) == pytest.approx(0.0)
+
+
+def test_a_prepared_tail_answers_identically_to_a_fresh_one():
+    """The shell prepares the table once per chain; it may not drift."""
+    _chain_leg, built = _run18_chain_path()
+    poses = built.poses
+    tail = nav2_path.cumulative_from_end(poses)
+    for _t, x, y in RUN18_KILL_WINDOW:
+        assert nav2_path.remaining_along((x, y), poses, tail_m=tail) == \
+            pytest.approx(nav2_path.remaining_along((x, y), poses))
+
+
+def test_a_corridor_that_is_not_one_is_refused_by_name():
+    with pytest.raises(nav2_path.Nav2PathError):
+        nav2_path.remaining_along((0.0, 0.0), [(1.0, 1.0)])
+    with pytest.raises(nav2_path.Nav2PathError):
+        nav2_path.remaining_along((float("nan"), 0.0),
+                                  [(0.0, 0.0), (1.0, 0.0)])
+
+
+# ----------------------------------------------------------------------
+# THE CONTRAST, which is the whole defect in one assertion
+# ----------------------------------------------------------------------
+
+def test_the_straight_line_grows_while_the_arclength_falls():
+    """run-18's kill window, measured both ways.
+
+    The two rulers disagree by five metres and a sign: straight-line
+    from 15.69 m out to 20.93 m and never back, arclength from 43.90 m
+    down to 36.63 m without a single step the wrong way.
+    """
+    _chain_leg, built = _run18_chain_path()
+    end = (-7.0, -10.0)
+    straight = [math.dist((x, y), end) for _t, x, y in RUN18_KILL_WINDOW]
+    along = [nav2_path.remaining_along((x, y), built.poses)
+             for _t, x, y in RUN18_KILL_WINDOW]
+
+    assert straight[0] == pytest.approx(15.686, abs=0.002)
+    assert max(straight) == pytest.approx(20.933, abs=0.002)
+    assert min(straight[1:]) > straight[0], "it never comes back"
+
+    assert along[0] == pytest.approx(43.896, abs=0.002)
+    assert along[-1] == pytest.approx(36.631, abs=0.002)
+    assert all(later <= earlier + 1e-9
+               for earlier, later in zip(along, along[1:])), "monotone"
+    assert along[0] - along[-1] == pytest.approx(7.265, abs=0.005)
+
+
+def test_every_ring_chain_on_the_floor_closes_on_its_own_path():
+    """The property the watchdog needs, over every route route.py plans.
+
+    A truck driving the path it was given must see the ruler fall at
+    every step, and a truck 0.60 m off to one side - the widest the
+    transit goal checker calls arrived - must see it fall too.
+    """
+    seen = 0
+    for station_id in STATIONS:
+        poly = route.plan_route(F1_SPAWN, station_id)
+        if poly is None:
+            continue
+        for leg in nav2_legs.plan_legs(poly):
+            if leg.klass != nav2_legs.RING_CHAIN:
+                continue
+            built = nav2_legs.chain_path(leg, current_yaw=math.pi)
+            tail = nav2_path.cumulative_from_end(built.poses)
+            seen += 1
+            for push in (0.0, 0.60, -0.60):
+                previous = None
+                for x, y, yaw in built.poses:
+                    side = (x - push * math.sin(yaw),
+                            y + push * math.cos(yaw))
+                    now = nav2_path.remaining_along(side, built.poses,
+                                                    tail_m=tail)
+                    assert previous is None or now <= previous + 1e-9, \
+                        (station_id, push, x, y, now, previous)
+                    previous = now
+    assert seen >= 8
+
+
+def test_no_ring_chain_on_this_floor_comes_back_near_itself():
+    """The honest statement of the projection's one caveat.
+
+    `project_onto` answers with the NEAREST point of the corridor, and
+    on a corridor that ran back within a couple of metres of itself the
+    nearest point could be the wrong one - the remaining arclength
+    would jump backwards and the watchdog would read a stall. It is a
+    property of the FLOOR that no chain does, so the floor is what is
+    asserted: any two points of a ring chain more than 5.00 m apart
+    ALONG the path are more than TRIM_NEAR_M apart across the room.
+    (5.00 m is the corner's own width - two 1.41 m run-ins either side
+    of a 1.96 m quarter arc is 4.79 m, and that is the closest a chain
+    legitimately comes to itself.)
+    """
+    worst = None
+    for station_id in STATIONS:
+        poly = route.plan_route(F1_SPAWN, station_id)
+        if poly is None:
+            continue
+        for leg in nav2_legs.plan_legs(poly):
+            if leg.klass != nav2_legs.RING_CHAIN:
+                continue
+            built = nav2_legs.chain_path(leg, current_yaw=math.pi)
+            tail = nav2_path.cumulative_from_end(built.poses)
+            poses = built.poses
+            for i in range(len(poses)):
+                for j in range(i + 1, len(poses)):
+                    if tail[i] - tail[j] <= 5.00:
+                        continue
+                    gap = math.dist(poses[i][:2], poses[j][:2])
+                    if worst is None or gap < worst[0]:
+                        worst = (gap, station_id)
+    assert worst is not None
+    assert worst[0] > nav2_path.TRIM_NEAR_M, worst

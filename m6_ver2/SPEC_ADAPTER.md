@@ -498,3 +498,33 @@ allowed to change is `test_m6.py` where it pins the bringup child list
    unchanged. §8's in-motion property is inherited trivially (one Path
    spans the chain); §5 stands (no DSP anywhere); D12's ALIGN retires
    with its reason recorded.
+
+10. **The closing watchdog measures along the chain (G1-C9 ruling,
+    2026-09-03).** §9 moved ring legs onto `/follow_path` and left
+    ClosingWatch "unchanged" - and unchanged meant still fed the
+    STRAIGHT LINE from the believed pose to the leg's end. A chain
+    turns away from its own end by construction: the S1 -> S4 grant
+    leaves the bay NORTHWARD up the spur while S4's spur foot is fifteen
+    metres SOUTH, so run-18 measured the straight line growing 15.69 ->
+    20.93 m over thirty seconds of a leg the truck was driving perfectly
+    at 0.30 m/s with the fleet's own node counter advancing 10 -> 9 -> 8
+    underneath, and the watchdog cancelled four consecutive orders on
+    "blocked: no progress - best 15.69 m, 30 s without closing". The
+    RULE is right and was pinned against drive_goal's; the RULER was
+    wrong for this leg class. Every leg is now dispatched with the
+    metric it closes on - `nav2_watch.straight_metric(leg.end)` for a
+    manoeuvre, `nav2_watch.chain_metric(built.poses)` for a ring chain,
+    the latter projecting the belief onto the path that was actually
+    sent and reading the arclength LEFT of it (43.90 -> 36.63 m,
+    monotone, over the same thirty seconds). One projection
+    (`nav2_path.project_onto`) now answers all three questions the
+    adapter asks of a corridor - how far off it, where along it, where
+    to trim it - and its one caveat is stated rather than assumed: the
+    nearest-point rule needs a corridor that does not come back near
+    itself, and the suite asserts that over every ring chain
+    `route.py` plans on this floor rather than trusting the sentence.
+    The note names the ruler when it is not the ordinary one ("best
+    36.64 m **along the chain**"); the straight sentence keeps its
+    bytes. The watchdog's own number goes in the adapter log every
+    `CLOSING_LOG_S` (5 s) while a leg runs, because a chain table is
+    written once and a chain lasts two minutes.

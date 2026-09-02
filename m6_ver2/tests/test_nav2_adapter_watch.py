@@ -18,6 +18,8 @@ import pytest
 
 import drive_goal
 
+import nav2_legs
+import nav2_path
 import nav2_watch
 
 
@@ -252,3 +254,170 @@ def test_the_chain_refusal_note_is_a_sentence_and_not_a_number():
     assert note.startswith("blocked: ")
     assert "polyline" in note
     assert "error_code" not in note
+
+
+# ----------------------------------------------------------------------
+# DEFECT D16: ONE WATCH, TWO RULERS, AND THE CHAIN'S IS NAMED
+#
+# The rule above is right and it was fed the wrong number. A RING_CHAIN
+# turns away from its own end by construction, so the straight line to
+# that end GROWS while the truck drives the corridor correctly - run-18
+# killed four consecutive orders on it at 0.30 m/s with the fleet's own
+# node counter advancing 10 -> 9 -> 8 underneath.
+#
+# The rule does not change. What changes is that the watch now carries
+# the RULER it is measuring with, so the shell cannot pick the wrong one
+# by omission and the note can say which one produced the number.
+# ----------------------------------------------------------------------
+
+#: run-18's leg-2 chain, and the pose track that killed it. The route
+#: is byte-for-byte the one vda_agent released at 13:23:07.
+RUN18_ROUTE = [(-12.999499560306049, 4.493182698768322),
+               (-13.0, 4.25), (-13.0, 10.0), (-10.0, 10.0), (-7.0, 10.0),
+               (-3.5, 10.0), (0.0, 10.0), (0.0, 0.0), (0.0, -10.0),
+               (-3.5, -10.0), (-7.0, -10.0), (-7.0, -4.25)]
+
+RUN18_KILL_WINDOW = [
+    (0.00, -12.9995, 4.4932), (1.05, -13.0002, 4.5475),
+    (2.17, -13.0031, 4.8560), (3.20, -13.0069, 5.1288),
+    (4.25, -13.0085, 5.4222), (5.33, -13.0089, 5.7081),
+    (6.41, -13.0022, 6.0326), (7.44, -12.9894, 6.3010),
+    (8.51, -12.9822, 6.6010), (9.62, -12.9739, 6.8914),
+    (10.65, -12.9705, 7.1877), (11.71, -12.9705, 7.4643),
+    (12.82, -12.9750, 7.8016), (13.85, -12.9825, 8.0947),
+    (14.90, -13.0060, 8.3786), (15.97, -13.0407, 8.6715),
+    (17.06, -13.0743, 8.9462), (18.11, -13.0959, 9.1797),
+    (19.20, -13.0855, 9.4067), (20.27, -13.0394, 9.6309),
+    (21.31, -12.9474, 9.8344), (22.38, -12.8085, 10.0057),
+    (23.48, -12.6253, 10.1464), (24.51, -12.3728, 10.2322),
+    (25.58, -12.0715, 10.2269), (26.64, -11.7708, 10.1604),
+    (27.69, -11.4903, 10.0769), (28.73, -11.2294, 9.9969),
+    (29.81, -10.9416, 9.9238), (30.88, -10.7355, 9.8883),
+    (31.71, -10.7046, 9.8837),
+]
+
+
+def _run18_chain():
+    legs = nav2_legs.plan_legs(RUN18_ROUTE)
+    return legs[0], nav2_legs.chain_path(
+        legs[0], current_yaw=-1.567, start_xy=(-12.9995, 4.4932))
+
+
+def test_the_straight_ruler_is_the_distance_to_the_leg_end():
+    metric = nav2_watch.straight_metric((-7.0, -10.0))
+    assert metric.name == "dist"
+    assert metric.of((-13.0, 4.25)) == math.dist((-13.0, 4.25),
+                                                 (-7.0, -10.0))
+
+
+def test_the_chain_ruler_is_what_is_left_of_the_path():
+    _leg, built = _run18_chain()
+    metric = nav2_watch.chain_metric(built.poses)
+    assert metric.name == "remain"
+    assert metric.of((-13.0, 4.25)) == pytest.approx(44.14, abs=0.01)
+    assert metric.of((-7.0, -10.0)) == pytest.approx(0.0, abs=0.01)
+
+
+def test_the_watch_measures_with_the_ruler_it_was_given():
+    watch = nav2_watch.ClosingWatch(
+        0.50, 30.0, metric=nav2_watch.straight_metric((0.0, 0.0)))
+    assert watch.measure((3.0, 4.0)) == pytest.approx(5.0)
+
+
+def test_a_watch_with_no_ruler_refuses_to_measure_by_name():
+    """The rule may be built with two numbers - that is the port the
+    drive_goal tests pin - but a shell that forgets to hand it a ruler
+    gets an exception and never a silent guess."""
+    watch = nav2_watch.ClosingWatch(0.50, 30.0)
+    assert watch.metric is None
+    assert watch.step(0.0, 9.0) is None
+    with pytest.raises(nav2_watch.Nav2WatchError) as caught:
+        watch.measure((1.0, 1.0))
+    assert "ruler" in str(caught.value) or "metric" in str(caught.value)
+
+
+def test_observe_measures_and_steps_in_one_call():
+    watch = nav2_watch.ClosingWatch(
+        0.50, 10.0, metric=nav2_watch.straight_metric((0.0, 0.0)))
+    distance, stalled = watch.observe(0.0, (10.0, 0.0))
+    assert distance == pytest.approx(10.0) and stalled is None
+    for t in range(1, 20):
+        distance, stalled = watch.observe(float(t), (10.0, 0.0))
+    assert stalled is not None
+    assert stalled.mark == pytest.approx(10.0)
+
+
+# ----------------------------------------------------------------------
+# THE REGRESSION, in the watch's own terms
+# ----------------------------------------------------------------------
+
+def test_run18s_kill_window_kills_on_the_straight_ruler():
+    """What actually happened: four orders, this note, each time."""
+    straight = nav2_watch.straight_metric((-7.0, -10.0))
+    watch = nav2_watch.ClosingWatch(0.50, 30.0, metric=straight)
+    verdict = None
+    for t, x, y in RUN18_KILL_WINDOW:
+        _d, stalled = watch.observe(t, (x, y))
+        verdict = verdict or stalled
+    assert verdict is not None
+    assert verdict.mark == pytest.approx(15.686, abs=0.002)
+    # THE FIXTURE SAMPLES AT 1 Hz AND THE SHELL AT 20 - so the verdict
+    # here lands 0.88 s late and rounds to 31. The note run-18 actually
+    # printed is the one a 20 Hz watch produces off the SAME mark, and
+    # that is the byte-for-byte claim.
+    assert (nav2_watch.blocked_note_no_progress(
+                nav2_watch.Stalled(t=30.05, distance=20.93,
+                                   mark=verdict.mark, since_s=30.05),
+                straight)
+            == "blocked: no progress - best 15.69 m, 30 s without closing")
+
+
+def test_run18s_kill_window_survives_the_chain_ruler():
+    """The same thirty seconds, measured along the path the truck drove.
+
+    It falls 7.26 m without one step the wrong way, so the mark moves on
+    every single sample and the clock never starts.
+    """
+    _leg, built = _run18_chain()
+    watch = nav2_watch.ClosingWatch(
+        0.50, 30.0, metric=nav2_watch.chain_metric(built.poses))
+    first = last = None
+    for t, x, y in RUN18_KILL_WINDOW:
+        distance, stalled = watch.observe(t, (x, y))
+        assert stalled is None, (t, distance)
+        first = distance if first is None else first
+        last = distance
+    assert first == pytest.approx(43.896, abs=0.002)
+    assert last == pytest.approx(36.631, abs=0.002)
+
+
+def test_the_note_names_the_ruler_when_it_is_not_the_ordinary_one():
+    """A "best 36.64 m" on a chain is not a "best 36.64 m" across a room.
+
+    The note is the wire's only WHY and vda_agent quotes it verbatim
+    into a pathBlocked errorDescription, so the sentence has to say
+    which ruler produced the number. The straight one is the ordinary
+    case and its bytes do not move.
+    """
+    stalled = nav2_watch.Stalled(t=41.0, distance=36.70, mark=36.64,
+                                 since_s=30.4)
+    assert (nav2_watch.blocked_note_no_progress(
+                stalled, nav2_watch.chain_metric([(0.0, 0.0), (1.0, 0.0)]))
+            == "blocked: no progress - best 36.64 m along the chain, "
+               "30 s without closing")
+    assert (nav2_watch.blocked_note_no_progress(stalled)
+            == nav2_watch.blocked_note_no_progress(
+                stalled, nav2_watch.straight_metric((0.0, 0.0))))
+
+
+def test_a_ruler_the_note_table_does_not_know_is_refused_by_name():
+    stalled = nav2_watch.Stalled(t=41.0, distance=2.93, mark=2.91,
+                                 since_s=30.4)
+    made_up = nav2_watch.ClosingMetric(name="furlongs", of=lambda xy: 1.0)
+    with pytest.raises(nav2_watch.Nav2WatchError):
+        nav2_watch.blocked_note_no_progress(stalled, made_up)
+
+
+def test_the_chain_ruler_refuses_a_path_that_is_not_one():
+    with pytest.raises(nav2_path.Nav2PathError):
+        nav2_watch.chain_metric([(0.0, 0.0)])

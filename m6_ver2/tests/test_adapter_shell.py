@@ -1399,7 +1399,8 @@ def test_the_leg_table_quotes_the_speed_the_handover_happened_at(rig):
     rig.tf_at(-13.0, 8.0, -1.571)
     rig.status(motor=True)
     rig.tick()
-    dispatch = [line for line in lines if line.startswith("leg 1/1")]
+    dispatch = [line for line in lines
+                if line.startswith("leg 1/1") and " closing " not in line]
     assert len(dispatch) == 2, lines
     assert "v=-0.301" in dispatch[1], dispatch[1]
     # AND THE CHAIN TABLE CARRIES ITS OWN NUMBERS (AMENDMENTS 9): a path
@@ -1642,13 +1643,15 @@ def test_the_leg_table_says_where_the_goal_went(rig):
     rig.tick()
     rig.follow.handles[0].result_future.fire(types.SimpleNamespace(
         status=Messages.SUCCEEDED, result=types.SimpleNamespace(error_code=0)))
-    legs = [line for line in lines if line.startswith("leg ")]
+    legs = [line for line in lines
+            if line.startswith("leg ") and " closing " not in line]
     assert len(legs) == 2, legs
     # THE CHAIN LINE IS A DIFFERENT SHAPE AND SAYS SO (AMENDMENTS 9): it
     # names the server, its own end, and the four numbers that are the
     # decision - there is no single goal pose to print.
     assert "ring chain follow_path end=(-13.00, 10.00)" in legs[0], legs[0]
-    assert "len=4.00 poses=41 corners=0 dropped=0" in legs[0], legs[0]
+    assert ("len=4.00 remain=4.00 poses=41 corners=0 dropped=0"
+            in legs[0]), legs[0]
     assert "sense=" in legs[0], legs[0]
     assert "end=(-13.00, 4.25) goal=(-13.00, 4.15)" in legs[1], legs[1]
 
@@ -1728,3 +1731,183 @@ def test_a_late_abort_cannot_un_arrive_a_latched_arrival(driving):
     driving.tick()
     assert driving.state["state"] == nav2_state.ARRIVED
     assert not (driving.state.get("note") or "")
+
+
+# ----------------------------------------------------------------------
+# DEFECT D16: THE WATCH IS HANDED THE CHAIN'S OWN RULER
+#
+# run18-c8-session-c, measured. On a RING_CHAIN the shell fed the
+# ClosingWatch the straight line to the leg end, and a chain turns away
+# from its end by construction: S1 -> S4 leaves the bay NORTHWARD while
+# S4's spur foot is fifteen metres SOUTH. Four consecutive orders died
+# at 0.30 m/s with the fleet's own node counter advancing 10 -> 9 -> 8:
+#
+#   adapter  leg 1/2 ring chain follow_path end=(-7.00, -10.00)
+#            head=(-13.00, 4.25) len=44.14 poses=444 corners=3
+#   /auto/state  BLOCKED "blocked: no progress - best 15.69 m, 30 s
+#            without closing"                                    x 4
+#
+# The rule was right and the ruler was wrong. Every leg now dispatches
+# with the metric it closes on: a manoeuvre with the straight line to
+# its goal, a chain with what is LEFT of the path it was given.
+# ----------------------------------------------------------------------
+
+#: run-18's own leg-2 grant for S1 -> S4, head pose and all.
+RUN18_ROUTE = [(-12.999499560306049, 4.493182698768322),
+               (-13.0, 4.25), (-13.0, 10.0), (-10.0, 10.0), (-7.0, 10.0),
+               (-3.5, 10.0), (0.0, 10.0), (0.0, 0.0), (0.0, -10.0),
+               (-3.5, -10.0), (-7.0, -10.0), (-7.0, -4.25)]
+
+#: (t from dispatch, believed x, believed y) off run-18's /f1/est/odom
+#: between the FollowPath dispatch at 13:23:07 and the kill at 13:23:37.
+#: `clock_s` is monotonic wall time, so these are the watchdog's own
+#: thirty seconds.
+RUN18_KILL_WINDOW = [
+    (0.00, -12.9995, 4.4932), (1.05, -13.0002, 4.5475),
+    (2.17, -13.0031, 4.8560), (3.20, -13.0069, 5.1288),
+    (4.25, -13.0085, 5.4222), (5.33, -13.0089, 5.7081),
+    (6.41, -13.0022, 6.0326), (7.44, -12.9894, 6.3010),
+    (8.51, -12.9822, 6.6010), (9.62, -12.9739, 6.8914),
+    (10.65, -12.9705, 7.1877), (11.71, -12.9705, 7.4643),
+    (12.82, -12.9750, 7.8016), (13.85, -12.9825, 8.0947),
+    (14.90, -13.0060, 8.3786), (15.97, -13.0407, 8.6715),
+    (17.06, -13.0743, 8.9462), (18.11, -13.0959, 9.1797),
+    (19.20, -13.0855, 9.4067), (20.27, -13.0394, 9.6309),
+    (21.31, -12.9474, 9.8344), (22.38, -12.8085, 10.0057),
+    (23.48, -12.6253, 10.1464), (24.51, -12.3728, 10.2322),
+    (25.58, -12.0715, 10.2269), (26.64, -11.7708, 10.1604),
+    (27.69, -11.4903, 10.0769), (28.73, -11.2294, 9.9969),
+    (29.81, -10.9416, 9.9238), (30.88, -10.7355, 9.8883),
+    (31.71, -10.7046, 9.8837),
+]
+
+
+def _drive_run18_window(rig):
+    """Replay the thirty seconds that killed four orders, tick by tick."""
+    base = rig.holder["t"]
+    for offset, x, y in RUN18_KILL_WINDOW:
+        rig.holder["t"] = base + offset
+        # THE PLC IS FRESH ON EVERY TICK, because a stale one is a
+        # SAFETY-STOP and this replay is about the watchdog.
+        rig.status()
+        rig.tf_at(x, y, -1.571 if y < 9.0 else math.pi)
+        rig.adapter.tick()
+
+
+def test_a_chain_dispatches_with_the_chains_own_ruler(rig):
+    _at_s1(rig, float(STATIONS["S1"]["yaw"]))
+    rig.route(OUT_OF_S1)
+    watch = rig.adapter.watch
+    assert watch.metric.name == "remain"
+    # AT THE DISPATCH THE RULER READS THE WHOLE PATH, which is the same
+    # number the chain table prints as `len=`.
+    built = nav2_legs.chain_path(rig.adapter.legs[0],
+                                 float(STATIONS["S1"]["yaw"]),
+                                 start_xy=(-13.0, 4.25))
+    assert watch.measure((-13.0, 4.25)) == pytest.approx(built.length_m,
+                                                         abs=0.01)
+
+
+def test_a_manoeuvre_dispatches_with_the_straight_line_to_its_goal(
+        two_trees):
+    watch = two_trees.adapter.watch
+    assert watch.metric.name == "dist"
+    assert watch.measure((-17.0, 10.0)) == pytest.approx(4.0)
+
+
+def test_the_chain_table_carries_the_ruler_it_starts_from(rig):
+    lines = []
+    rig.node.get_logger = lambda: types.SimpleNamespace(
+        info=lines.append, warn=lines.append)
+    _at_s1(rig, float(STATIONS["S1"]["yaw"]))
+    rig.route(OUT_OF_S1)
+    dispatch = [line for line in lines if "ring chain follow_path" in line]
+    assert len(dispatch) == 1, lines
+    assert "remain=" in dispatch[0], dispatch[0]
+
+
+def test_run18s_thirty_seconds_no_longer_block_the_order(rig):
+    """The whole defect, end to end, on the route that produced it."""
+    rig.mode()
+    rig.tf_at(-12.9995, 4.4932, -1.567)
+    rig.status()
+    rig.tick()
+    rig.route(RUN18_ROUTE)
+    assert rig.adapter.legs[0].klass == nav2_legs.RING_CHAIN
+    assert rig.adapter.state.state == nav2_state.EN_ROUTE
+    _drive_run18_window(rig)
+    assert rig.adapter.state.state == nav2_state.EN_ROUTE, \
+        rig.adapter.state.note
+    assert not (rig.state.get("note") or "")
+    assert rig.follow.handles[-1].cancelled is False
+
+
+def test_the_same_thirty_seconds_still_block_on_the_straight_line(rig):
+    """The contrast, driven through the shell rather than argued.
+
+    The identical replay with the OLD ruler bolted back on ends in the
+    note run-18 printed four times - which is what makes the fix a fix
+    and not a coincidence of the fixture.
+    """
+    rig.mode()
+    rig.tf_at(-12.9995, 4.4932, -1.567)
+    rig.status()
+    rig.tick()
+    rig.route(RUN18_ROUTE)
+    rig.adapter.watch = nav2_watch.ClosingWatch(
+        rig.adapter.required_closing_m, rig.adapter.closing_allowance_s,
+        metric=nav2_watch.straight_metric(rig.adapter.legs[0].end))
+    _drive_run18_window(rig)
+    assert rig.adapter.state.state == nav2_state.BLOCKED
+    # THE MARK IS RUN-18'S TO THE CENTIMETRE. The seconds read 31 and
+    # not 30 because this replay samples at 1 Hz where the shell runs
+    # at 20 - the verdict lands 0.88 s late, and the note format itself
+    # is pinned byte for byte in test_nav2_adapter_watch.py.
+    assert rig.adapter.state.note == (
+        "blocked: no progress - best 15.69 m, 31 s without closing")
+
+
+def test_a_chain_that_really_stops_is_still_caught(rig):
+    """The verdict the watchdog exists for, on the new ruler.
+
+    A truck standing still on a chain closes on nothing, so the mark
+    never moves and the note names the chain's ruler.
+    """
+    rig.mode()
+    rig.tf_at(-12.9995, 4.4932, -1.567)
+    rig.status()
+    rig.tick()
+    rig.route(RUN18_ROUTE)
+    base = rig.holder["t"]
+    for step in range(0, 40):
+        rig.holder["t"] = base + float(step)
+        rig.status()
+        rig.tf_at(-13.0, 4.30, -1.571)
+        rig.adapter.tick()
+    assert rig.adapter.state.state == nav2_state.BLOCKED
+    assert "along the chain" in rig.adapter.state.note
+    assert rig.adapter.state.note.startswith("blocked: no progress - best ")
+
+
+def test_the_closing_number_reaches_the_log_while_the_leg_runs(rig):
+    """The mid-drive samples a field run reads back.
+
+    A chain table is written once and the leg lasts two minutes; the
+    only way a session can say the ruler was falling is for the ruler
+    to be on the record while the truck drives.
+    """
+    lines = []
+    rig.node.get_logger = lambda: types.SimpleNamespace(
+        info=lines.append, warn=lines.append)
+    rig.mode()
+    rig.tf_at(-12.9995, 4.4932, -1.567)
+    rig.status()
+    rig.tick()
+    rig.route(RUN18_ROUTE)
+    _drive_run18_window(rig)
+    closing = [line for line in lines if " closing " in line]
+    assert len(closing) >= 3, lines
+    assert "remain=" in closing[0] and "mark=" in closing[0]
+    numbers = [float(line.split("remain=")[1].split()[0])
+               for line in closing]
+    assert numbers == sorted(numbers, reverse=True), numbers

@@ -454,6 +454,131 @@ def build_chain_path(polyline, radius_m, spacing_m=SPACING_M, flipped=False):
                      flipped=bool(flipped), dropped=dropped)
 
 
+#: WHERE A POINT SITS ON A POLYLINE, said once for the three readers
+#: that ask (`trim_to`, `offset_from_polyline`, `remaining_along`).
+#:   `index`     the segment it lands on, `polyline[index]` ->
+#:               `polyline[index + 1]`
+#:   `scale`     0.0 at that segment's start, 1.0 at its end, clamped -
+#:               so a point beyond either end of the corridor projects
+#:               onto the corridor's own end and never past it
+#:   `foot`      the (x, y) of the projection
+#:   `offset_m`  how far the point is FROM the corridor
+Projection = collections.namedtuple("Projection", "index scale foot offset_m")
+
+
+def project_onto(point, polyline):
+    """Where `point` sits on `polyline`, or None if that is not a
+    polyline at all.
+
+    NEAREST, AND THE CAVEAT IS NAMED RATHER THAN ASSUMED. This answers
+    with the closest point of the whole corridor, which is the right
+    answer for a corridor that does not come back near itself and the
+    wrong one for a corridor that does - a chain running back within a
+    couple of metres of its own earlier self could project a truck onto
+    the wrong lap, and `remaining_along` would read a jump backwards.
+    route.py's graph does not draw one (every ring chain is a shortest
+    path over aisle centrelines four metres apart, and
+    tests/test_nav2_adapter_path.py asserts the separation over every
+    route on the floor rather than trusting this sentence). The day a
+    floor is cut that does, this is the function that has to learn to
+    walk forward from the last foot instead of searching the lot.
+
+    TIES GO TO THE EARLIEST SEGMENT, because among equals a chain that
+    ran back past its own head would otherwise be trimmed to its tail.
+    """
+    points = [(float(row[0]), float(row[1])) for row in polyline]
+    if not points:
+        return None
+    best = None
+    for index in range(len(points) - 1):
+        first, second = points[index], points[index + 1]
+        span_x, span_y = second[0] - first[0], second[1] - first[1]
+        span = span_x * span_x + span_y * span_y
+        if span <= 0.0:
+            continue
+        scale = ((point[0] - first[0]) * span_x
+                 + (point[1] - first[1]) * span_y) / span
+        scale = max(0.0, min(1.0, scale))
+        foot = (first[0] + span_x * scale, first[1] + span_y * scale)
+        gap = math.dist(point, foot)
+        if best is None or gap < best.offset_m - 1e-9:
+            best = Projection(index=index, scale=scale, foot=foot,
+                              offset_m=gap)
+    if best is None:
+        # EVERY SEGMENT IS DEGENERATE, so the corridor is one point and
+        # the honest projection is that point.
+        return Projection(index=0, scale=0.0, foot=points[0],
+                          offset_m=math.dist(point, points[0]))
+    return best
+
+
+def cumulative_from_end(polyline):
+    """For each vertex, the arclength from it to the polyline's END.
+
+    Backwards on purpose: what a leg is measured by is what is LEFT of
+    it, and counting from the end means the answer does not have to be
+    subtracted from a total somebody else computed.
+    """
+    points = [(float(row[0]), float(row[1])) for row in polyline]
+    tail = [0.0] * len(points)
+    for index in range(len(points) - 2, -1, -1):
+        tail[index] = tail[index + 1] + math.dist(points[index],
+                                                  points[index + 1])
+    return tuple(tail)
+
+
+def remaining_along(point, polyline, tail_m=None):
+    """How much of `polyline` is LEFT from where `point` sits on it.
+
+    THE RULER A CHAIN LEG CLOSES ON (defect D16, run18-c8-session-c).
+    A ring chain turns AWAY from its own end by construction - the
+    S1 -> S4 grant leaves the bay northward while S4's spur foot is
+    fifteen metres south - so the straight line to the end GROWS for the
+    first third of the leg while the truck drives it perfectly. Four
+    consecutive orders died on that: 0.30 m/s on the ground truth, the
+    fleet's node counter advancing 10 -> 9 -> 8, and "blocked: no
+    progress - best 15.69 m, 30 s without closing" every time.
+      This measures along the path the truck was actually given, so a
+    truck driving it correctly closes at its own road speed whatever
+    direction the goal happens to lie in.
+
+    `tail_m` IS THE SAME TABLE, PREPARED ONCE. The shell asks this
+    twenty times a second against four hundred poses; `cumulative_from_end`
+    is loop-invariant and is hoisted out at dispatch. Passing a table
+    computed from a DIFFERENT polyline is the one way to get a wrong
+    answer out of this, which is why the argument is named after what it
+    is and the suite pins prepared against fresh.
+
+    IT IS MEASURED OFF THE FOOT AND NOT OFF THE TRUCK. A truck half a
+    metre off its corridor has not driven half a metre; the offset is
+    `offset_from_polyline`'s question and it is asked separately.
+    """
+    if len(polyline) < 2:
+        raise Nav2PathError(
+            "a corridor of {} point(s) has no length to have any left, "
+            "so there is nothing to measure a leg's closing against"
+            .format(len(polyline)))
+    try:
+        target = (float(point[0]), float(point[1]))
+    except (TypeError, ValueError, IndexError):
+        raise Nav2PathError(
+            "the believed position is {!r}, which is not an (x, y) "
+            "point".format(point))
+    if not all(math.isfinite(value) for value in target):
+        raise Nav2PathError(
+            "the believed position is {!r}: how much of a path is left "
+            "under a non-finite belief is not a question with an answer"
+            .format(point))
+    where = project_onto(target, polyline)
+    tail = cumulative_from_end(polyline) if tail_m is None else tail_m
+    first = (float(polyline[where.index][0]),
+             float(polyline[where.index][1]))
+    second = (float(polyline[where.index + 1][0]),
+              float(polyline[where.index + 1][1]))
+    return max(0.0, tail[where.index]
+               - where.scale * math.dist(first, second))
+
+
 #: HOW FAR OFF ITS OWN CORRIDOR A TRUCK MAY BE AND STILL BE ON IT.
 #: Beyond this `trim_to` declines to project at all and hands back the
 #: whole grant, because a trim decided off a projection metres away is a
@@ -510,26 +635,14 @@ def trim_to(points, xy, near_m=TRIM_NEAR_M, radius_m=None):
         raise Nav2PathError(
             "the truck's position on its chain is {!r}: a path trimmed "
             "to a non-finite belief is a path sent at random".format(xy))
-    best = None
-    for index in range(len(cleaned) - 1):
-        first, second = cleaned[index], cleaned[index + 1]
-        span_x, span_y = second[0] - first[0], second[1] - first[1]
-        span = span_x * span_x + span_y * span_y
-        if span <= 0.0:
-            continue
-        scale = ((target[0] - first[0]) * span_x
-                 + (target[1] - first[1]) * span_y) / span
-        scale = max(0.0, min(1.0, scale))
-        foot = (first[0] + span_x * scale, first[1] + span_y * scale)
-        gap = math.dist(target, foot)
-        # STRICTLY NEARER WINS, so among equals the EARLIEST segment
-        # does - a chain that ran back past its own head would otherwise
-        # be trimmed to its tail.
-        if gap <= near_m and (best is None or gap < best[0] - 1e-9):
-            best = (gap, index, foot)
-    if best is None:
+    # ONE PROJECTION, AND `near_m` IS THIS READER'S OWN GATE: beyond it
+    # the trim is declined and the whole grant goes back, because a head
+    # decided off a projection metres away is a corridor this file
+    # invented. The nearest-and-earliest rule itself is project_onto's.
+    where = project_onto(target, cleaned)
+    if where is None or where.offset_m > near_m:
         return cleaned
-    _gap, index, foot = best
+    index, foot = where.index, where.foot
     if radius_m is not None and index + 2 < len(cleaned):
         turns = corner_turns(cleaned)
         if abs(turns[index]) >= REVERSAL_RAD:
@@ -612,23 +725,13 @@ def offset_from_polyline(point, polyline):
     else. The session reading uses the same function on ground truth,
     so what the suite asserts about the plan and what the rig measures
     about the truck are the same number computed the same way.
+
+    HOW FAR OFF, WHERE ALONG, AND WHERE TO TRIM ARE ONE MEASUREMENT
+    (`project_onto`) READ THREE WAYS. This is the cross-track half of
+    it; `remaining_along` is the along-track half.
     """
-    best = float("inf")
-    for index in range(len(polyline) - 1):
-        first = (float(polyline[index][0]), float(polyline[index][1]))
-        second = (float(polyline[index + 1][0]),
-                  float(polyline[index + 1][1]))
-        span_x, span_y = second[0] - first[0], second[1] - first[1]
-        span = span_x * span_x + span_y * span_y
-        if span <= 0.0:
-            best = min(best, math.dist(point, first))
-            continue
-        scale = ((point[0] - first[0]) * span_x
-                 + (point[1] - first[1]) * span_y) / span
-        scale = max(0.0, min(1.0, scale))
-        best = min(best, math.dist(
-            point, (first[0] + span_x * scale, first[1] + span_y * scale)))
-    return best
+    where = project_onto(point, polyline)
+    return float("inf") if where is None else where.offset_m
 
 
 def _selftest():
@@ -696,7 +799,35 @@ def _selftest():
     check("... and the path built from there still carries no cusp",
           cusp_at(build_chain_path(backed, radius, 0.10).poses) is None)
 
+    # D16: THE RULER A CHAIN LEG CLOSES ON. This is run-18's chain in
+    # miniature - a corridor that leaves NORTH for a goal that lies
+    # SOUTH - so the straight line to the end grows down the first arm
+    # while the arclength falls at the truck's own road speed.
+    away = [(0.0, 0.0), (0.0, 20.0), (20.0, 20.0), (20.0, -20.0)]
+    check("the remaining arclength is the whole corridor at the head",
+          abs(remaining_along((0.0, 0.0), away) - 80.0) < 1e-9
+          and abs(remaining_along((20.0, -20.0), away)) < 1e-9)
+    check("it is measured off the FOOT and not off the truck",
+          abs(remaining_along((0.6, 4.0), away) - 76.0) < 1e-9)
+    grows = [math.dist((0.0, y), (20.0, -20.0)) for y in (0.0, 6.0, 12.0)]
+    falls = [remaining_along((0.0, y), away) for y in (0.0, 6.0, 12.0)]
+    check("and where the straight line GROWS {:.2f} -> {:.2f} m the "
+          "arclength FALLS {:.2f} -> {:.2f} m".format(
+              grows[0], grows[-1], falls[0], falls[-1]),
+          grows[0] < grows[-1] and falls[0] > falls[-1])
+    check("the cumulative table counts back from the end",
+          cumulative_from_end(away) == (80.0, 60.0, 40.0, 0.0))
+    check("one projection answers where AND how far off",
+          project_onto((3.0, 1.0), [(0.0, 0.0), (10.0, 0.0)]).index == 0
+          and abs(project_onto((3.0, 1.0),
+                               [(0.0, 0.0), (10.0, 0.0)]).offset_m - 1.0)
+          < 1e-9)
+
     for name, call in (
+            ("a corridor of one point", lambda: remaining_along(
+                (0.0, 0.0), [(1.0, 1.0)])),
+            ("a non-finite belief", lambda: remaining_along(
+                (float("nan"), 0.0), [(0.0, 0.0), (1.0, 0.0)])),
             # TEN METRES AND NOT ONE: a head stub shorter than the
             # radius is a parking error and is DROPPED (D14), so the
             # reversal this refusal is about has to be a granted leg.

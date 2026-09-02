@@ -86,6 +86,14 @@ TOOL = "nav2_adapter"
 TICK_HZ = 20.0
 STATE_EVERY = 2
 
+#: HOW OFTEN THE WATCHDOG'S OWN NUMBER GOES IN THE LOG WHILE A LEG RUNS
+#: (D16). It is a sixth of `nav.watchdog.closing_allowance_s` (30 s), so
+#: a leg that stalls has five samples of the ruler standing still behind
+#: it and a forty-metre chain has thirty lines rather than three
+#: thousand. It is a LOG rate and nothing reads it: no decision on this
+#: contract is taken at 5 s.
+CLOSING_LOG_S = 5.0
+
 #: Every dotted key this file reads. MAINTENANCE OBLIGATION (the same
 #: one m5_ver3/tools/_common.py carries): a key read below is a key
 #: listed here, or a reorganised config reaches the first callback and
@@ -370,6 +378,10 @@ class Adapter(object):
         self.legs = []
         self.leg_i = 0
         self.watch = None
+        #: WHEN THE WATCHDOG'S NUMBER WAS LAST WRITTEN DOWN (D16). It is
+        #: rate limiting for a log line and it holds no decision; -inf
+        #: so the first tick of the first leg is on the record.
+        self._closing_logged = float("-inf")
         self.handle = None
         #: EVERY GOAL CARRIES ONE, and a result whose generation is not
         #: the current one is DROPPED. A preempted leg comes back
@@ -564,11 +576,27 @@ class Adapter(object):
             self._advance_to(self.leg_i + 1, world[2])
             return
         if self.watch is not None:
-            stalled = self.watch.step(now, distance)
+            # THE WATCHDOG READS ITS OWN RULER AND NOT THIS ONE (D16).
+            # `distance` above is the PREEMPT's question - am I within P
+            # of the end of this leg - and on a ring chain it is not a
+            # measure of progress at all: a chain turns away from its
+            # own end by construction, so the straight line grew 15.69
+            # -> 20.93 m over thirty seconds of a leg the truck was
+            # driving at 0.30 m/s, and run-18 cancelled four consecutive
+            # orders on it. The leg is dispatched with the metric it
+            # closes on; `observe` reads it and steps the rule in one
+            # call so the number judged is the number logged.
+            closing, stalled = self.watch.observe(now, world[:2])
             if stalled is not None:
+                # THE RULER IS READ BEFORE THE WATCH IS PUT DOWN:
+                # `_abandon_goal` clears it, and a note built afterwards
+                # would be asking a None what it had been measuring.
+                metric = self.watch.metric
                 self._abandon_goal()
-                self.state.block(nav2_watch.blocked_note_no_progress(stalled))
+                self.state.block(nav2_watch.blocked_note_no_progress(
+                    stalled, metric))
                 return
+            self._log_closing(now, leg, closing)
         if self.state.check_arrival(world[:2]):
             # THE LATCH ENDS THE ROUTE, AND SPLITTING IT FROM THE CANCEL
             # WAS TRIED AND MEASURED (run 14, 2026-09-03). D13 aims the
@@ -592,6 +620,29 @@ class Adapter(object):
             # what it can be on this contract: margin against NAV2's own
             # checker, which is the consumer D6 measured missing it.
             self._abandon_goal()
+
+    def _log_closing(self, now, leg, closing):
+        """The watchdog's own number, on the record while the leg runs.
+
+        A LEG TABLE IS WRITTEN ONCE AND A CHAIN LASTS TWO MINUTES. The
+        dispatch line says what was sent; nothing said whether the thing
+        the watchdog was watching was moving, and run-18's whole defect
+        lived in that gap - four orders cancelled while the truck drove
+        and every line on the rig agreed it was driving. This is that
+        gap closed: the ruler, its name, the mark it has to beat and how
+        long the mark has stood, at a rate an operator can read.
+        """
+        if now - self._closing_logged < CLOSING_LOG_S:
+            return
+        self._closing_logged = now
+        self.node.get_logger().info(
+            "leg {}/{} {} closing {}={:.2f} mark={:.2f} since={:.1f} "
+            "v={:+.3f}".format(
+                self.leg_i + 1, len(self.legs), leg.klass,
+                self.watch.metric.name, closing,
+                self.watch.mark if self.watch.mark is not None else closing,
+                0.0 if self.watch.t_mark is None else now - self.watch.t_mark,
+                self.body_twist[0]))
 
     # ------------------------- the leg runner -------------------------
 
@@ -720,8 +771,14 @@ class Adapter(object):
         self.leg_i = index
         self.generation += 1
         generation = self.generation
-        self.watch = nav2_watch.ClosingWatch(self.required_closing_m,
-                                             self.closing_allowance_s)
+        # THE RULER IS THE STRAIGHT LINE TO THE LEG'S END (D16), because
+        # a manoeuvre is a goal in front of the truck and closing on it
+        # IS getting nearer to it. The end and not the goal: D13's
+        # message aims past the point, the leg still stops on it.
+        self.watch = nav2_watch.ClosingWatch(
+            self.required_closing_m, self.closing_allowance_s,
+            metric=nav2_watch.straight_metric(leg.end))
+        self._closing_logged = float("-inf")
         goal_yaw = nav2_legs.leg_yaw(leg, current_yaw)
         # THE LEG TABLE, ON THE RECORD. A goal that has left is in map
         # coordinates and its class is on no wire at all, so without
@@ -814,8 +871,17 @@ class Adapter(object):
         self.leg_i = index
         self.generation += 1
         generation = self.generation
-        self.watch = nav2_watch.ClosingWatch(self.required_closing_m,
-                                             self.closing_allowance_s)
+        # THE RULER IS THE CHAIN'S OWN PATH (D16, run18-c8-session-c).
+        # A chain turns AWAY from its end by construction - S1 -> S4
+        # leaves the bay northward while S4's spur foot is fifteen
+        # metres south - so the straight line to the end grows for the
+        # first third of the leg and the watchdog killed four orders on
+        # it at 0.30 m/s. What closes is what is LEFT of the path that
+        # is being sent, so that is what the watch is handed.
+        self.watch = nav2_watch.ClosingWatch(
+            self.required_closing_m, self.closing_allowance_s,
+            metric=nav2_watch.chain_metric(built.poses))
+        self._closing_logged = float("-inf")
         # THE CHAIN TABLE, ON THE RECORD, AND IT IS THE LEG TABLE'S JOB
         # DONE FOR A DIFFERENT SHAPE. A goal that has left carries one
         # pose an operator can read back off the wire; a path carries
@@ -824,13 +890,19 @@ class Adapter(object):
         # many poses, how many corners were rounded, and which sense was
         # chosen - beside the speed at dispatch that AMENDMENTS 8 made
         # the leg table carry.
+        #   AND IT CARRIES THE WATCHDOG'S FIRST READING SINCE D16. The
+        # ruler is new and it is the thing that cancelled four orders
+        # when it was the wrong one, so the dispatch states what it read
+        # at the instant the goal left - which on a fresh chain is the
+        # whole of `len=` and is a cross-check on both numbers at once.
         self.node.get_logger().info(
             "leg {}/{} ring chain follow_path end=({:.2f}, {:.2f}) "
-            "head=({:.2f}, {:.2f}) len={:.2f} poses={} corners={} "
-            "dropped={} sense={} truck_yaw={} v={:+.3f}".format(
+            "head=({:.2f}, {:.2f}) len={:.2f} remain={:.2f} poses={} "
+            "corners={} dropped={} sense={} truck_yaw={} v={:+.3f}".format(
                 index + 1, len(self.legs), leg.end[0], leg.end[1],
                 built.poses[0][0], built.poses[0][1],
-                built.length_m, len(built.poses), built.corners,
+                built.length_m, self.watch.measure(world),
+                len(built.poses), built.corners,
                 built.dropped, nav2_path.sense_name(built.flipped),
                 "none" if current_yaw is None
                 else "{:+.3f}".format(current_yaw),
