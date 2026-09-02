@@ -351,11 +351,12 @@ TO_S1 = [(-17.0, 10.0), (-13.0, 10.0), (-13.0, 4.25)]
 
 #: TWO TRANSIT LEGS, split at a junction turn and ending nowhere in
 #: particular. It is the OTHER shape, and it has to be a second route
-#: rather than a second reading of the first: TO_S1's two legs are two
-#: CLASSES, so its leg switch changes the behaviour tree and nav2
-#: refuses to preempt across it (see _advance_to). True preemption -
-#: the thing PREEMPT_AT_M was measured for - only ever happens between
-#: legs of the same class, and this is a route that has some.
+#: rather than a second reading of the first: TO_S1 ends in a BAY, so
+#: its leg switch changes the behaviour tree and nav2 refuses to preempt
+#: across it (see _advance_to). True preemption - the thing
+#: PREEMPT_AT_M was measured for - only ever happens between legs that
+#: SHARE A TREE, and since SPEC_ADAPTER.md AMENDMENTS 4 that is every
+#: pair except the last one into a bay.
 TWO_TRANSITS = [(-17.0, 10.0), (-13.0, 10.0), (-13.0, -10.0)]
 
 
@@ -522,7 +523,12 @@ def test_acceptance_sets_en_route_synchronously(driving):
 
 
 def test_the_first_leg_goes_out_with_its_own_tree(driving):
-    """Two legs, transit then station spur, and the classes pick trees."""
+    """Two legs, transit then station spur, and the classes pick trees.
+
+    The transit leg's tree is the RPP one since AMENDMENTS 4; the bay's
+    is the RPP tree with the 0.25 m checker named. Two different files,
+    which is what makes the boundary below a cancel and not a preempt.
+    """
     legs = driving.adapter.legs
     assert [leg.klass for leg in legs] == [nav2_legs.TRANSIT,
                                            nav2_legs.STATION_SPUR]
@@ -530,7 +536,7 @@ def test_the_first_leg_goes_out_with_its_own_tree(driving):
     goal = driving.action.goals[0]
     assert goal["frame_id"] == driving.cfg.s("frames.map")
     assert goal["behavior_tree"].endswith(
-        os.path.basename(driving.cfg.s("nav.bt_xml")))
+        os.path.basename(driving.cfg.s("nav.bt_xml_rpp")))
     # THE GOAL IS IN THE MAP FRAME, and the leg end is in m6's world -
     # so the registration has to have been applied. Round-tripping it is
     # the cheapest check that it was applied the right way round: at
@@ -618,9 +624,9 @@ def test_the_rejected_preemptions_own_abort_is_not_a_failure(driving):
 def test_true_preemption_still_runs_between_legs_of_one_class(transiting):
     """P = 1.5 m with NO cancel in it, which is what it was measured for.
 
-    Two transit legs share nav.bt_xml, so bt_navigator takes the second
-    goal as a real preemption and displaces the first itself - the truck
-    never stops, and `executing` never flickers.
+    Two transit legs share nav.bt_xml_rpp, so bt_navigator takes the
+    second goal as a real preemption and displaces the first itself -
+    the truck never stops, and `executing` never flickers.
     """
     transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M - 0.5, 10.0)
     transiting.tick()
@@ -631,7 +637,7 @@ def test_true_preemption_still_runs_between_legs_of_one_class(transiting):
     assert transiting.action.cancels == 0
     assert transiting.adapter.pending_leg is None
     assert transiting.action.goals[1]["behavior_tree"].endswith(
-        os.path.basename(transiting.cfg.s("nav.bt_xml")))
+        os.path.basename(transiting.cfg.s("nav.bt_xml_rpp")))
 
 
 def test_a_cancel_takes_the_waiting_leg_with_it(driving):
@@ -1017,11 +1023,13 @@ def test_leaving_en_route_centres_the_wheel_and_the_hold_follows(driving):
 # different hat.
 # ----------------------------------------------------------------------
 
-#: A route that LEAVES a bay: spur exit (rpp) then transit (mppi). The
-#: tree changes across the leg boundary, so the second leg goes out
-#: through the cancel-then-send door and not through a preemption - and
-#: that second leg is a TRANSIT, which is the only class whose heading
-#: D7 touches.
+#: A route that LEAVES a bay: spur exit then transit. Since
+#: AMENDMENTS 4 both are RPP on ONE tree, so nav2 would allow a true
+#: preemption here - and defect D10 (runs 8 and 9) is what happened
+#: when it got one, and again when the adapter used the cancel door
+#: instead. The spur exit is DRIVEN TO ITS GOAL now, and the transit
+#: after it starts on nav2's SUCCEEDED, from a stop. That second leg
+#: is a TRANSIT, which is the only class whose heading D7 touches.
 OUT_OF_S1 = [(-13.0, 4.25), (-13.0, 10.0), (0.0, 10.0)]
 
 
@@ -1102,14 +1110,15 @@ def test_the_preempted_leg_takes_the_flip_when_the_yaw_asks_for_it(
     assert abs(follower.norm_ang(north - math.pi / 2.0)) < 1e-6
 
 
-def test_the_held_leg_is_built_on_the_yaw_at_the_SEND_and_not_the_cancel(
-        rig):
-    """DOOR 3 - cancel, then send, which is run-5's own boundary.
+def test_the_leg_after_a_bay_mouth_is_built_on_the_yaw_at_the_SEND(rig):
+    """DOOR 3 by another name - defect D10's door, which is nav2's
+    SUCCEEDED rather than a cancel.
 
-    A tree change makes the adapter wait for the cancelled goal's
-    result before it sends (see _advance_to), and the truck KEEPS
-    MOVING through that wait. So the yaw that decides the heading is the
-    one at the send and not the one at the decision: here the truck
+    Inside P the spur exit is NOT handed over: no cancel, no pending
+    leg, no second goal. It runs to its own goal, RPP decelerates into
+    it, and the next leg starts when nav2 says the old one finished.
+    The truck is still rolling through that (a tricycle takes 0.208 m
+    to stop), so the goal is built on the yaw at the SEND: here it
     swings from -1.3 to -1.9 in between, which crosses the quarter turn
     and changes the answer from 0.0 to pi.
     """
@@ -1117,30 +1126,80 @@ def test_the_held_leg_is_built_on_the_yaw_at_the_SEND_and_not_the_cancel(
     rig.route(OUT_OF_S1)
     assert [leg.klass for leg in rig.adapter.legs] == [
         nav2_legs.SPUR_EXIT, nav2_legs.TRANSIT]
+    # ONE TREE, SO NAV2 WOULD ALLOW THE PREEMPTION. The refusal is ours.
+    assert rig.adapter.legs[0].tree_key == rig.adapter.legs[1].tree_key
     rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.3)
     rig.tick()
-    assert rig.adapter.pending_leg == 1
+    rig.tf_at(-13.0, 10.0 - 0.2, -1.3)
+    rig.tick()
+    assert rig.adapter.pending_leg is None
+    assert rig.action.cancels == 0
     assert len(rig.action.goals) == 1
-    # the truck turns while the cancelled goal is still on the server
-    rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.9)
+    # the truck rolls to a stop while nav2 finishes with the goal
+    rig.tf_at(-13.0, 10.0, -1.9)
     rig.action.handles[0].result_future.fire(types.SimpleNamespace(
-        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
+        status=Messages.SUCCEEDED,
+        result=types.SimpleNamespace(error_code=0)))
     assert len(rig.action.goals) == 2
     east = _goal_yaw(rig, 1)
     assert abs(follower.norm_ang(east - math.pi)) < 1e-6
     assert _turn(east, -1.9) <= math.pi / 2.0
 
 
-def test_the_same_held_leg_keeps_the_travel_direction_from_the_other_side(
-        rig):
+def test_the_same_leg_keeps_the_travel_direction_from_the_other_side(rig):
     _at_s1(rig, float(STATIONS["S1"]["yaw"]))
     rig.route(OUT_OF_S1)
     rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.9)
     rig.tick()
-    rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.3)
+    rig.tf_at(-13.0, 10.0, -1.3)
+    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED,
+        result=types.SimpleNamespace(error_code=0)))
+    assert len(rig.action.goals) == 2
+    assert abs(follower.norm_ang(_goal_yaw(rig, 1))) < 1e-6
+
+
+def test_the_last_leg_into_a_bay_cancels_for_the_tree_and_not_the_mouth(
+        rig):
+    """DOOR 3 on the OTHER boundary, and for the other reason.
+
+    The bay's tree names the 0.25 m checker, so it is a different file
+    and nav2 itself refuses to preempt across it: the adapter cancels,
+    waits for the server's own result, and only then sends. The truck
+    KEEPS MOVING through that wait, so the goal has to be built on the
+    pose it is standing at when the send happens and not the one it was
+    at when the decision was taken (D7).
+      A STATION LEG'S HEADING IS THE BAY'S and does not move with the
+    truck, so the yaw cannot be read off the goal here - it is read off
+    the adapter's own leg line, which is the seam the field run quotes.
+    """
+    lines = []
+    rig.node.get_logger = lambda: types.SimpleNamespace(
+        info=lines.append, warn=lines.append)
+    rig.mode()
+    rig.tf_at(-17.0, 10.0)
+    rig.status()
+    rig.tick()
+    rig.route(TO_S1)
+    assert [leg.klass for leg in rig.adapter.legs] == [
+        nav2_legs.TRANSIT, nav2_legs.STATION_SPUR]
+    rig.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0, -1.3)
+    rig.tick()
+    assert rig.adapter.pending_leg == 1
+    assert rig.action.cancels == 1
+    assert len(rig.action.goals) == 1
+    # the truck turns into the bay while the cancelled goal is still on
+    # the server
+    rig.tf_at(-13.0, 9.0, -1.9)
     rig.action.handles[0].result_future.fire(types.SimpleNamespace(
         status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
-    assert abs(follower.norm_ang(_goal_yaw(rig, 1))) < 1e-6
+    assert len(rig.action.goals) == 2
+    assert _goal_yaw(rig, 1) == pytest.approx(float(STATIONS["S1"]["yaw"]),
+                                              abs=1e-6)
+    leg2 = [line for line in lines if "leg 2/2" in line]
+    assert len(leg2) == 1
+    assert "truck_yaw=-1.900" in leg2[0]
+    assert "truck_yaw=-1.300" not in leg2[0]
 
 
 def test_a_resume_re_goals_on_where_the_truck_is_now(driving):

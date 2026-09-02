@@ -724,25 +724,71 @@ def test_the_third_tree_differs_by_exactly_the_goal_checker(built):
         assert "<FollowPath " in left[line]
 
 
-def test_the_leg_table_and_the_derived_config_name_the_same_three_trees(built):
+def test_the_leg_table_and_the_derived_config_name_the_same_trees(built):
     """THE CROSS-FILE PIN, and it is the one that would fail silently.
 
     nav2_legs.CLASS_TREE maps a leg class onto a config KEY; the
     derivation writes the key. A table naming a key the derivation does
     not write is a KeyError at boot if you are lucky and a goal carrying
     an empty behavior_tree if you are not.
+
+    SINCE SPEC_ADAPTER.md AMENDMENTS 4 THE TABLE NAMES TWO OF THE THREE,
+    and the third is still written. `nav.bt_xml` is the PRIMARY tree:
+    truck.sh hands it to bt_navigator as `default_nav_to_pose_bt_xml`
+    (test_truck_sh.py pins that it is the only tree passed on a command
+    line), so it has to exist on disk in every derivation even though no
+    goal this adapter builds will ever name it.
     """
     import nav2_legs
     root, _ = built
     keys = sorted({key for _controller, key in nav2_legs.CLASS_TREE.values()})
-    assert keys == ["nav.bt_xml", "nav.bt_xml_rpp", "nav.bt_xml_station"]
+    assert keys == ["nav.bt_xml_rpp", "nav.bt_xml_station"]
     for vid in VIDS:
         nav = _cfg(root, vid)["nav"]
-        for key in keys:
+        for key in keys + ["nav.bt_xml"]:
             path = nav[key.split(".", 1)[1]]
             assert path.startswith("m6_ver2/vehicles/{}/".format(vid)), key
             assert os.path.exists(
                 os.path.join(root, vid, os.path.basename(path))), key
+
+
+def test_mppi_stays_configured_though_no_leg_class_names_it(built):
+    """AMENDMENTS 4's SECOND HALF, and it is the deliberate one.
+
+    Moving the transit row onto RPP is one line in nav2_legs.py. What it
+    must NOT do is take MPPI out of the stack: the counter-evidence the
+    ruling weighed is real (m5v3's clean 17 m spawn straight measured
+    MPPI 8/8 against RPP 7/8), and RPP's own unrecovered lateral
+    excursion is a NAMED residual rather than a solved one. So the
+    controller stays declared, its whole parameter block stays, and the
+    primary tree that defaults to it stays - the fallback is one table
+    row away, not one derivation away.
+    """
+    import nav2_legs
+    root, _ = built
+    named = sorted({key for _c, key in nav2_legs.CLASS_TREE.values()})
+    for vid in VIDS:
+        params = _controller_server(root, vid)
+        assert params["controller_plugins"] == ["FollowPath", "FollowPathRPP"]
+        assert params["FollowPath"]["plugin"] == (
+            "nav2_mppi_controller::MPPIController")
+        assert params["FollowPathRPP"]["plugin"] == (
+            "nav2_regulated_pure_pursuit_controller::"
+            "RegulatedPurePursuitController")
+        nav = _cfg(root, vid)["nav"]
+        # THE TREE IS WHAT SELECTS THE CONTROLLER, through its
+        # ControllerSelector default. Every tree the leg table names
+        # defaults to FollowPathRPP; the one it does not name is the
+        # only one still defaulting to MPPI, and it is only ever
+        # bt_navigator's boot default now.
+        for key in named:
+            body = itk.read_text(os.path.join(root, vid, os.path.basename(
+                nav[key.split(".", 1)[1]])))
+            assert 'default_controller="FollowPathRPP"' in body, key
+        primary = itk.read_text(os.path.join(root, vid, os.path.basename(
+            nav["bt_xml"])))
+        assert 'default_controller="FollowPath"' in primary
+        assert 'default_controller="FollowPathRPP"' not in primary
 
 
 def test_an_insertion_is_refused_when_its_anchor_has_moved(tmp_path,

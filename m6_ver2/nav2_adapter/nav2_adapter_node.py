@@ -303,12 +303,18 @@ class Adapter(object):
         # estimate composed through that transform, so the two can
         # straddle one boundary (defect D6, run4).
         self.arrival_margin_m = nav2_pose.floor_margin_m(self.frame)
-        # THE THREE TREES, KEYED BY THE NAME nav2_legs.CLASS_TREE USES.
-        # The dict is built from that table rather than typed out, so a
-        # leg class that names a fourth tree is a KeyError on the config
-        # key at BOOT - refused by its dotted name by load_config - and
-        # not a goal forty metres into a drive carrying a path
-        # bt_navigator cannot open.
+        # THE TREES THE LEG TABLE NAMES, KEYED BY THE NAME
+        # nav2_legs.CLASS_TREE USES. The dict is built from that table
+        # rather than typed out, so a leg class that names a tree the
+        # config does not carry is a KeyError on the config key at BOOT
+        # - refused by its dotted name by load_config - and not a goal
+        # forty metres into a drive carrying a path bt_navigator cannot
+        # open.
+        #   IT IS TWO OF THE THREE SINCE SPEC_ADAPTER.md AMENDMENTS 4,
+        # and the third is not missing: `nav.bt_xml` is the primary tree
+        # truck.sh hands bt_navigator as `default_nav_to_pose_bt_xml`.
+        # Every goal this node builds names its tree, so the default is
+        # never reached - MPPI stays configured and unnamed.
         self.trees = dict(
             (key, os.path.join(_donors.REPO, cfg.s(key)))
             for _controller, key in nav2_legs.CLASS_TREE.values())
@@ -523,7 +529,8 @@ class Adapter(object):
         # second cancel would bump the generation the pending send is
         # waiting on.
         if self.pending_leg is None \
-                and nav2_legs.should_preempt(distance, leg.final) \
+                and nav2_legs.should_preempt(
+                    distance, nav2_legs.runs_to_its_goal(leg)) \
                 and self.leg_i + 1 < len(self.legs):
             self._advance_to(self.leg_i + 1, world[2])
             return
@@ -589,17 +596,28 @@ class Adapter(object):
         transit -> station-spur boundary, which is the last leg of EVERY
         route: the order died there, 1.49 m from the spur foot, on the
         first run that got this far.
+          SINCE AMENDMENTS 4 THAT IS THE ONLY BOUNDARY NAV2 REFUSES,
+        because the transit row moved onto the RPP tree and every other
+        pair of legs now shares one. THE OTHER BOUNDARY THAT MUST NOT
+        BE TAKEN AT SPEED - the bay mouth, defect D10 - NEVER REACHES
+        THIS METHOD WITH A GOAL RUNNING: nav2_legs.runs_to_its_goal
+        keeps the spur exit out of _drive's preempt branch altogether,
+        so the mouth arrives here through _on_result with self.handle
+        already None. Run 9 is why it is not a door: the adapter
+        cancelled at the mouth and nav2 answered ELEVEN MILLISECONDS
+        later, with the truck still at 0.273 m/s. Neither door is a
+        stop.
 
-        So the tree decides the door. Same tree: true preemption, which
-        is what P = 1.5 m was measured for and what keeps the truck
-        moving. Different tree: nav2's own instruction, in its own
-        order - cancel, and send when the server reports the old goal
-        finished (_on_result), never on a timer. The truck decelerates
-        into the spur foot, which is where a tricycle turning into a
-        4.00 m bay off the ring band was going to slow down anyway.
+        So: same tree, true preemption - which is what P = 1.5 m was
+        measured for and what keeps the truck moving. Different tree:
+        nav2's own instruction, in its own order - cancel, and send
+        when the server reports the old goal finished (_on_result),
+        never on a timer. The truck decelerates into the spur foot,
+        which is where a tricycle turning into a 4.00 m bay off the
+        ring band was going to slow down anyway.
         """
-        if self.handle is None \
-                or self.legs[index].tree_key == self.legs[self.leg_i].tree_key:
+        if self.handle is None or nav2_legs.drives_through(
+                self.legs[self.leg_i], self.legs[index]):
             self._send_leg(index, current_yaw)
             return
         self.pending_leg = index

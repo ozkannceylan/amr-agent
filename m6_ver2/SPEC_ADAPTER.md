@@ -412,3 +412,18 @@ allowed to change is `test_m6.py` where it pins the bringup child list
    8/8 vs RPP 7/8 — but the measured incidence HERE is 6/10 against
    ~1/8, and RPP's unrecovered lateral-excursion class stays NAMED
    (the closing watchdog and the fleet's own requeue are its net).
+
+5. **The derived RPP/station trees drop DirectionStablePath (G1-C5
+   ruling, 2026-09-03).** DEC-006 kept DSP as "the seat belt on the
+   MPPI legs"; §4 removed the last MPPI leg, and run-8/9/10 measured
+   DSP's only remaining effect on RPP legs: eleven direction-holds
+   defending a stale mouth-built plan across the D11 arc while the
+   truck drifted 2.4 m off it. A deterministic tracker handles a
+   direction flip by its own cusp mechanism (findVelocitySignChange);
+   the guard's object is gone. The derivation strips the decorator
+   from the derived rpp/station trees (counted, residue-pinned); the
+   donor trees and the unnamed MPPI tree keep it. If the corridor
+   breach persists WITHOUT the amplifier, the second assigned fix is
+   an alignment split: the first leg off a spur mouth gets a short
+   on-ring goal before the long transit — measured between, one change
+   at a time.

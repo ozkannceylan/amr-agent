@@ -33,7 +33,7 @@ THE STATION SPUR FOOT. The second rule is not implied by the first and
 it earns its place on a real case: a truck standing 0.20 m off the ring
 centreline ON a spur's own x plans [pose, spur foot, station] - three
 points on one straight line - and a split made only at turns would hand
-the whole thing to MPPI and lose the station goal checker.
+the whole thing to the transit tree and lose the station goal checker.
   THE SPUR FOOT, SINGULAR: the foot of the station this route ENDS at,
 and not every foot it drives past. Eleven of the twelve spur feet are
 ordinary ring nodes to a truck on its way somewhere else, and splitting
@@ -83,16 +83,39 @@ TRANSIT = "transit"
 #: m6_ver2/vehicles/fN/config.yaml nav block, because the path is a
 #: deployment fact and the mapping is a control fact.
 #:
-#: THREE TREES AND TWO CONTROLLERS, WHICH IS NOT A CONTRADICTION. The
-#: tree carries TWO decisions to bt_navigator, not one: which controller
-#: its ControllerSelector defaults to, and - since M6V2-G1-B5 - which
-#: goal checker its FollowPath names. The station spur and the spur exit
-#: are both RPP legs and they finish differently: the spur runs into a
-#: BAY and is the only leg allowed to complete, so it names the 0.25 m
-#: `station_goal_checker`; the spur exit is a leg out of a bay that gets
-#: preempted 1.5 m from its end like any other transit, so it keeps the
-#: 0.60 m one. A third tree is what says that, because a goal checker is
-#: an attribute of a behaviour tree and there is no other door.
+#: TWO TREES AND ONE CONTROLLER, SINCE SPEC_ADAPTER.md AMENDMENTS 4
+#: (G1-C4, 2026-09-02, AMR-DEC-005 extended). The transit row used to
+#: read ("mppi", "nav.bt_xml") and it was measured wrong: AMENDMENTS 3
+#: made every transit goal bidirectional, so every transit leg is driven
+#: FORKS-FIRST, which on this model is nav2-reverse - the reversal-heavy
+#: class AMR-DEC-005 had already taken off MPPI on the m5_ver3 side.
+#: Run 7 then found m5v3's creep fingerprint verbatim on m6v2's transit
+#: legs: four plateaus with means 0.0816-0.0905 m/s inside
+#: EVIDENCE_STALL's 0.0777-0.0901 band, the direction-hold node holding
+#: flip plans through them, the orbit at the leg end, and 6 BLOCKEDs in
+#: 10 legs. The spec's own sanctioned fallback - RPP for all legs - was
+#: taken. MPPI STAYS CONFIGURED and its tree stays derived: it is
+#: bt_navigator's `default_nav_to_pose_bt_xml` and one table row from
+#: being driven again, because the counter-evidence is real (m5v3's
+#: clean 17 m spawn straight, MPPI 8/8 against RPP 7/8) and RPP's
+#: unrecovered lateral-excursion class, ~1 in 8 on long straights with
+#: no cross-track term, is NAMED rather than solved. Its net is the
+#: closing watchdog and the fleet's own requeue.
+#:   THE TREE STILL CARRIES TWO DECISIONS, not one: which controller its
+#: ControllerSelector defaults to, and - since M6V2-G1-B5 - which goal
+#: checker its FollowPath names. That second one is why there are still
+#: THREE trees behind two rows. The station spur runs into a BAY and is
+#: the only leg allowed to complete, so it names the 0.25 m
+#: `station_goal_checker`; the spur exit and the transit get preempted
+#: 1.5 m from their ends and keep the 0.60 m one. A separate tree is
+#: what says that, because a goal checker is an attribute of a
+#: behaviour tree and there is no other door.
+#:   AND IT IS THE ONE TREE CHANGE LEFT IN A ROUTE. nav2 refuses a
+#: preemption that changes the BT XML, so a tree boundary costs a
+#: cancel and a stop (nav2_adapter_node._advance_to). With the transit
+#: row on the RPP tree the only such boundary is the last one, into the
+#: bay - the spur-exit-to-transit boundary, which used to stop the truck
+#: at the mouth of every undock, is now a true preemption.
 #:   AND EVERY ROW NAMES ONE. Two goal checkers are declared in the
 #: derived nav2.yaml, and nav2_controller only falls back to "the only
 #: plugin loaded" when there IS only one - see
@@ -102,7 +125,7 @@ TRANSIT = "transit"
 CLASS_TREE = collections.OrderedDict((
     (STATION_SPUR, ("rpp", "nav.bt_xml_station")),
     (SPUR_EXIT, ("rpp", "nav.bt_xml_rpp")),
-    (TRANSIT, ("mppi", "nav.bt_xml")),
+    (TRANSIT, ("rpp", "nav.bt_xml_rpp")),
 ))
 
 # ----------------------------- the numbers -----------------------------
@@ -112,18 +135,26 @@ CLASS_TREE = collections.OrderedDict((
 #: displaces the running goal itself and F4 Task 3's `Preempt`
 #: instrument already measured what that switch costs (a ~0.05 s class
 #: gap in the command stream).
-#:   1.5 AND NOT 1.0, AND THE REASON IS MPPI'S. Inside
+#:   1.5 AND NOT 1.0, AND THE REASON WAS MPPI'S. Inside
 #: MPPI_GOAL_THRESHOLD_M the GoalCritic takes over as a point
 #: attraction and the path critics hand off; a leg end reached inside
 #: that would be driven as if it were a destination - decelerated into,
 #: hooked round - which is exactly the per-node behaviour legs exist to
 #: remove. P sits OUTSIDE it, so an intermediate leg end never enters
 #: the endgame at all.
+#:   AMENDMENTS 4 MOVED THE LEGS AND NOT THIS NUMBER, because RPP's own
+#: endgame is SHORTER than MPPI's on every measure the derived nav2.yaml
+#: declares: `approach_velocity_scaling_dist` 1.0 m and
+#: `max_lookahead_dist` 0.95 m. 1.5 clears 1.4, 1.0 and 0.95 alike, so
+#: the largest of the three is still what binds - and it is still MPPI's,
+#: which is why the constant below stays.
 PREEMPT_AT_M = 1.5
 #: MPPI's own GoalCritic `threshold_to_consider`, m5_ver3/nav2.yaml.
 #: Carried here as the REASON for the number above and pinned by test;
 #: it is not a parameter of this file and changing it here changes
-#: nothing in nav2.
+#: nothing in nav2. It outlived AMENDMENTS 4 on purpose: no leg names
+#: MPPI any more, but it is still the widest endgame this stack has
+#: configured and therefore still the one P has to clear.
 MPPI_GOAL_THRESHOLD_M = 1.4
 
 #: HOW STRAIGHT "STRAIGHT ON" IS. The waypoint graph's own turns are all
@@ -239,12 +270,104 @@ def controller_for(klass):
     """
     if klass not in CLASS_TREE:
         raise Nav2LegsError(
-            "{!r} is not a leg class. This file knows exactly three, and "
-            "nav2.yaml declares exactly two controller plugins behind "
-            "them: {}".format(klass, ", ".join(
-                "{} -> {}".format(name, CLASS_TREE[name][0])
-                for name in CLASS_TREE)))
+            "{!r} is not a leg class. This file knows exactly three, "
+            "nav2.yaml declares two controller plugins and since "
+            "AMENDMENTS 4 the table names one of them: {}".format(
+                klass, ", ".join(
+                    "{} -> {}".format(name, CLASS_TREE[name][0])
+                    for name in CLASS_TREE)))
     return CLASS_TREE[klass]
+
+
+#: LEG CLASSES THAT ARE DRIVEN TO THEIR OWN GOAL rather than handed
+#: over at P. It is a tuple and not a bare comparison because the day a
+#: second class earns a stop, the place to say so is here and not
+#: inside an `if`. See runs_to_its_goal() for the measurement.
+DRIVEN_TO_ITS_GOAL = (SPUR_EXIT,)
+
+
+def runs_to_its_goal(leg):
+    """Is this leg driven to its own goal instead of handed over at P?
+
+    TWO CLASSES OF LEG, FOR TWO DIFFERENT REASONS.
+
+    THE FINAL LEG, always, and that is Decision 2: there is nothing to
+    hand over to, and it is the one leg whose completion the goal
+    checker is allowed to decide.
+
+    THE SPUR EXIT, and that is DEFECT D10 (runs 8 and 9, 2026-09-02).
+    AMENDMENTS 4 put the spur exit and the transit after it on ONE
+    tree, so for the first time nav2 allowed a hand-over at a bay
+    MOUTH - and took it:
+
+      adapter  leg 1/5 spur exit end=(-13.00, 10.00) goal_yaw=-1.571
+                                 truck_yaw=-1.565 turn=-0.006
+      adapter  leg 2/5 transit   end=( 0.00, 10.00) goal_yaw=-3.142
+                                 truck_yaw=-1.544 turn=-1.598
+      bt_navigator "Received goal preemption request"
+
+    The truck was doing 0.30 m/s and was handed a goal a QUARTER TURN
+    away, which by construction is what a mouth hands you: a spur meets
+    its ring leg at a right angle and the bay fixes the heading it is
+    left on (D5). It did not stop. Ground truth ran (-13.35, 9.12) ->
+    (-12.60, 10.00) -> (-11.83, 10.75) -> (-10.50, 11.80) ->
+    (-8.58, 12.36): a sweeping arc 2.36 m north of the ring centreline,
+    into the rack line, where the LEFT protective field demanded
+    (`PF b/r/l=T/T/F`), Motor latched False and the order died.
+      THE BELIEF WAS NOT THE DEFECT - the estimate held median 0.102 m,
+    p95 0.112 m, max 0.187 m against ground truth all session. Nor was
+    it one bad plan: a goal a quarter turn away can be reached driving
+    either way, the planner changes its mind every replan, and
+    bt_navigator's direction-hold node refused eleven fresh plans across
+    that arc ("fresh plan flips the driving direction at |v| = 0.301 m/s
+    (hold_speed 0.050), -1 -> +1, 12.59 m of the accepted plan left ...
+    keeping the accepted plan"). So the path being tracked stayed the
+    one built at the mouth while the truck drove off it.
+
+    AND IT IS NOT A DOOR, WHICH IS RUN 9's OWN LESSON. The first cut of
+    this fix routed the mouth through nav2's cancel-then-send door, on
+    the theory that the door was what used to stop the truck there. It
+    is not:
+
+      bt_navigator 1788327959.428  "Client requested to cancel the goal"
+      bt_navigator 1788327959.439  "Begin navigating from (-4.13, 1.31)"
+
+    ELEVEN MILLISECONDS. nav2 answers a cancel at once, the adapter
+    sends at once, and the truck coasts through the boundary at whatever
+    it was doing - 0.273 m/s on the next direction-hold line - and the
+    same arc happened again to the metre. BOTH DOORS HAND OVER AT P
+    WITH THE TRUCK MOVING; only a leg that runs to its own goal stops
+    it, because only then does RPP's approach_velocity_scaling_dist
+    (1.0 m) get to bring it down. nav2 then reports SUCCEEDED for a
+    non-final leg and defect D9's branch starts the next one from a
+    standstill - where the direction hold accepts every plan.
+
+    THE COST, STATED: one stop per undock, of about a second, at a
+    corner a 3.815 m tricycle with a 1.25 m turning radius was going to
+    slow down for anyway.
+    """
+    return leg.final or leg.klass in DRIVEN_TO_ITS_GOAL
+
+
+def drives_through(leg_from, leg_to):
+    """May the handover from `leg_from` into `leg_to` be a PREEMPTION?
+
+    True: nav2 displaces the running goal itself. False: the adapter
+    must use nav2's own cancel-then-send door
+    (nav2_adapter_node._advance_to). THE POLICY LIVES HERE, in the pure
+    module, because it is a statement about the leg classes; the shell
+    only owns the mechanics of the two doors.
+
+    ONE REASON, AND IT IS NAV2's AND NOT OURS: "Preemption with a new
+    BT is invalid since it would require cancellation of the previous
+    goal instead of true preemption" (bt_navigator 1.3.12, measured
+    2026-09-02). Since AMENDMENTS 4 that is exactly one boundary per
+    route, the last one, into a bay.
+      AND NEITHER DOOR IS A STOP - see runs_to_its_goal, which is where
+    D10 lives. A boundary the truck must not take at speed is not a
+    door problem: it is a leg that has to be driven to its goal.
+    """
+    return leg_from.tree_key == leg_to.tree_key
 
 
 def _clean(polyline):
@@ -380,8 +503,11 @@ def classify(leg_points, final):
     POINT itself, so the FIRST leg is that 0.245 m of parking error and
     the real exit is the SECOND one. Asking "is this leg first" gave the
     class to the parking error and left the bay-to-mouth leg a TRANSIT:
-    MPPI's tree, MPPI's goal checker, and - through leg_yaw - a goal
-    heading that demanded a 180 degree turn inside a dead-end spur. The
+    the transit tree, the 0.60 m goal checker, and - through leg_yaw -
+    a goal heading that demanded a 180 degree turn inside a dead-end
+    spur (at the time that was also MPPI's tree; AMENDMENTS 4 has since
+    moved the transit row onto RPP, which changes the controller and
+    changes nothing about the heading this paragraph is here for). The
     truck drove it, left the aisle, and latched a protective field.
       A leg that ENDS on a station is not leaving one, whatever it
     started on: that is the degenerate leg above, and it is a transit
@@ -525,12 +651,15 @@ def leg_yaw(leg, current_yaw=None, stations=STATIONS):
     return direction
 
 
-def should_preempt(distance_to_end_m, final):
+def should_preempt(distance_to_end_m, runs_to_its_goal):
     """Is it time to send the next leg?
 
-    THE FINAL LEG IS NEVER PREEMPTED - there is nothing to preempt it
-    with, and it is the one leg whose completion the goal checker is
-    allowed to decide.
+    THE ARGUMENT USED TO BE `final` AND IT IS NOW THE ANSWER
+    runs_to_its_goal() GIVES - defect D10. The final leg was the only
+    leg driven to its own goal until run 9 measured what a hand-over at
+    a bay mouth costs; the caller asks this file which legs those are
+    rather than reading one field of the tuple, so a new class joining
+    them is one line up there and none down here.
     """
     try:
         distance = float(distance_to_end_m)
@@ -542,7 +671,7 @@ def should_preempt(distance_to_end_m, final):
         raise Nav2LegsError(
             "the distance to the leg end is {!r}: a preempt decided off "
             "a non-finite belief is a goal sent at random".format(distance))
-    if final:
+    if runs_to_its_goal:
         return False
     return distance < PREEMPT_AT_M
 
@@ -563,8 +692,9 @@ def _selftest():
         if not cond:
             fails.append(name)
 
-    check("the preempt point sits OUTSIDE MPPI's endgame ({:.2f} m > "
-          "{:.2f} m)".format(PREEMPT_AT_M, MPPI_GOAL_THRESHOLD_M),
+    check("the preempt point sits OUTSIDE the widest endgame configured "
+          "({:.2f} m > {:.2f} m)".format(PREEMPT_AT_M,
+                                         MPPI_GOAL_THRESHOLD_M),
           PREEMPT_AT_M > MPPI_GOAL_THRESHOLD_M)
 
     feet = spur_feet()
@@ -579,11 +709,16 @@ def _selftest():
           [leg.klass for leg in legs] == [TRANSIT, STATION_SPUR])
     check("the ring run is ONE leg of eight collinear nodes",
           len(legs[0].points) == 8)
-    check("the spur is driven by rpp and the transit by mppi",
-          legs[1].controller == "rpp" and legs[0].controller == "mppi")
-    check("the spur runs the STATION tree and the transit the default",
+    check("every leg is driven by rpp - the transit row moved there in "
+          "AMENDMENTS 4",
+          all(leg.controller == "rpp" for leg in legs))
+    check("the spur runs the STATION tree and the transit the RPP one",
           legs[1].tree_key == "nav.bt_xml_station"
-          and legs[0].tree_key == "nav.bt_xml")
+          and legs[0].tree_key == "nav.bt_xml_rpp")
+    check("no leg class names MPPI or the primary tree, which stay "
+          "configured for bt_navigator's default (AMENDMENTS 4)",
+          not [row for row in CLASS_TREE.values()
+               if row[0] == "mppi" or row[1] == "nav.bt_xml"])
     check("the spur ends on S5's own approach heading",
           abs(leg_yaw(legs[1]) - float(STATIONS["S5"]["yaw"])) < 1e-12)
     segment = math.atan2(legs[0].end[1] - legs[0].points[-2][1],
@@ -607,6 +742,17 @@ def _selftest():
     out = plan_legs(route.plan_route((7.0, 4.25), "S9"))
     check("leaving a station is a dead-astern SPUR EXIT",
           out[0].klass == SPUR_EXIT)
+    check("and the only tree change left in the route is the last one, "
+          "into the bay (AMENDMENTS 4)",
+          [i for i in range(1, len(out))
+           if out[i].tree_key != out[i - 1].tree_key] == [len(out) - 1])
+    check("the bay MOUTH is driven to and not handed over - the truck "
+          "does not take a quarter turn at 0.3 m/s (D10)",
+          runs_to_its_goal(out[0]) and runs_to_its_goal(out[-1])
+          and not any(runs_to_its_goal(leg) for leg in out[1:-1]))
+    check("and nav2 itself objects to exactly one boundary, the bay's",
+          [i for i in range(len(out) - 1)
+           if not drives_through(out[i], out[i + 1])] == [len(out) - 2])
     check("and it leaves on S5's OWN heading - a spur is a dead end and "
           "the truck does not turn round in it (D5)",
           abs(leg_yaw(out[0]) - float(STATIONS["S5"]["yaw"])) < 1e-12)
@@ -639,16 +785,15 @@ def _selftest():
     check("a doubled first point is not a leg boundary",
           len(split_legs([(0.0, 0.0), (0.0, 0.0), (5.0, 0.0)])) == 1)
     check("the preempt fires below P and not above",
-          should_preempt(1.49, final=False)
-          and not should_preempt(1.51, final=False))
-    check("the final leg is never preempted",
-          not should_preempt(0.01, final=True))
+          should_preempt(1.49, runs_to_its_goal=False)
+          and not should_preempt(1.51, runs_to_its_goal=False))
+    check("a leg that runs to its own goal is never preempted",
+          not should_preempt(0.01, runs_to_its_goal=True))
 
     check("only the station spur names the station tree",
           [name for name, (_c, key) in CLASS_TREE.items()
            if key == "nav.bt_xml_station"] == [STATION_SPUR])
-    check("every leg class names a tree key and no two classes share a "
-          "controller they do not share a tree with",
+    check("every leg class names a tree key",
           all(key.startswith("nav.bt_xml")
               for _c, key in CLASS_TREE.values()))
 
@@ -658,7 +803,8 @@ def _selftest():
                        "a one-point polyline"),
                       (lambda: plan_legs([(1.0, 1.0), (1.0, 1.0)]),
                        "a polyline with no length"),
-                      (lambda: should_preempt(float("nan"), final=False),
+                      (lambda: should_preempt(float("nan"),
+                                              runs_to_its_goal=False),
                        "a non-finite distance"),
                       (lambda: leg_yaw(legs[0]),
                        "a transit leg asked for a heading without the "
@@ -668,8 +814,8 @@ def _selftest():
                       (lambda: leg_yaw(Leg(points=[(0.0, 0.0), (0.0, 0.0)],
                                            start=(0.0, 0.0),
                                            end=(0.0, 0.0), klass=TRANSIT,
-                                           controller="mppi",
-                                           tree_key="nav.bt_xml",
+                                           controller="rpp",
+                                           tree_key="nav.bt_xml_rpp",
                                            final=True)),
                        "a leg with no last segment")):
         try:
