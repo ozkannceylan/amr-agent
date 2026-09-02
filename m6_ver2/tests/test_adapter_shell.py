@@ -36,6 +36,7 @@ for _sub in (os.path.join(_M6V2, "tools"),):
     if _sub not in sys.path:
         sys.path.insert(0, _sub)
 
+import follower                                            # noqa: E402
 import instantiate_truck as itk                            # noqa: E402
 import nav2_adapter_node as shell                          # noqa: E402
 import nav2_envelope                                       # noqa: E402
@@ -44,6 +45,7 @@ import nav2_pose                                           # noqa: E402
 import nav2_seed                                           # noqa: E402
 import nav2_state                                          # noqa: E402
 import scan_mask_node                                      # noqa: E402
+from stations import STATIONS                              # noqa: E402
 from status_contract import MODE_AUTO, VEHICLES, contract  # noqa: E402
 
 VID = "f1"
@@ -1001,3 +1003,243 @@ def test_leaving_en_route_centres_the_wheel_and_the_hold_follows(driving):
     driving.tick()
     assert driving.cmd == (0.0, 0.0)
     assert driving.adapter.held_steer_rad == 0.0
+
+
+# ----------------------------------------------------------------------
+# 9. DEFECT D7: the current yaw reaches every door that builds a goal.
+#
+# nav2_legs decides the heading (SPEC_ADAPTER.md AMENDMENTS 3) and this
+# shell only carries the truck's yaw to it - but it has to carry it at
+# the moment the goal is BUILT, and there are THREE moments: the first
+# leg of a route, the leg the preempt sends, and the leg a SAFETY-STOP
+# re-sends when Motor comes back. A yaw read at the wrong instant is a
+# heading for a pose the truck has already left, which is D7 wearing a
+# different hat.
+# ----------------------------------------------------------------------
+
+#: A route that LEAVES a bay: spur exit (rpp) then transit (mppi). The
+#: tree changes across the leg boundary, so the second leg goes out
+#: through the cancel-then-send door and not through a preemption - and
+#: that second leg is a TRANSIT, which is the only class whose heading
+#: D7 touches.
+OUT_OF_S1 = [(-13.0, 4.25), (-13.0, 10.0), (0.0, 10.0)]
+
+
+def _goal_yaw(rig, index):
+    """The world-frame heading of goal `index`, off the wire it went out
+    on - through the registration, the same way round the adapter put it
+    there."""
+    goal = rig.action.goals[index]
+    return nav2_pose.to_world(rig.adapter.frame, goal["map_pose"][0],
+                              goal["map_pose"][1], goal["map_pose"][2])[2]
+
+
+def _turn(goal_yaw, current_yaw):
+    return abs(follower.norm_ang(goal_yaw - current_yaw))
+
+
+def _at_s1(rig, yaw):
+    """A truck standing in S1, in auto, with a live PLC."""
+    rig.mode()
+    rig.tf_at(-13.0, 4.25, yaw)
+    rig.status()
+    rig.tick()
+    return rig
+
+
+def test_the_first_goal_of_a_route_carries_the_trucks_own_yaw(rig):
+    """DOOR 1 - the initial dispatch.
+
+    TO_S1's first leg runs east and the truck is standing on pi, forks
+    east. The travel direction (0.0) would turn it round in the ring
+    band; the flip is what it is already doing.
+    """
+    rig.mode()
+    rig.tf_at(-17.0, 10.0, math.pi)
+    rig.status()
+    rig.tick()
+    rig.route(TO_S1)
+    assert rig.adapter.legs[0].klass == nav2_legs.TRANSIT
+    assert _turn(_goal_yaw(rig, 0), math.pi) < 1e-6
+
+
+def test_the_first_goal_follows_the_yaw_and_is_not_a_constant(rig):
+    """The same door, the same route, a truck pointing the other way -
+    and the goal moves with it. A fixed answer would pass the test
+    above and still be D7."""
+    rig.mode()
+    rig.tf_at(-17.0, 10.0, 0.2)
+    rig.status()
+    rig.tick()
+    rig.route(TO_S1)
+    assert _turn(_goal_yaw(rig, 0), 0.2) == pytest.approx(0.2, abs=1e-6)
+    assert abs(follower.norm_ang(_goal_yaw(rig, 0))) < 1e-6
+
+
+def test_the_preempted_leg_is_built_on_the_yaw_at_the_preempt(transiting):
+    """DOOR 2 - true preemption, between two legs of one class.
+
+    TWO_TRANSITS turns south at (-13.0, 10.0). A truck arriving on -0.4
+    is clear of the tie band on the travel direction's side and keeps
+    it; one arriving on +0.2 is on the flip's, and takes that. Same leg,
+    same geometry, two answers - so the yaw is being read.
+    """
+    transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0, -0.4)
+    transiting.tick()
+    assert len(transiting.action.goals) == 2
+    assert transiting.action.cancels == 0
+    south = _goal_yaw(transiting, 1)
+    assert _turn(south, -0.4) <= math.pi / 2.0
+    assert abs(follower.norm_ang(south + math.pi / 2.0)) < 1e-6
+
+
+def test_the_preempted_leg_takes_the_flip_when_the_yaw_asks_for_it(
+        transiting):
+    transiting.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0, 0.2)
+    transiting.tick()
+    north = _goal_yaw(transiting, 1)
+    assert _turn(north, 0.2) <= math.pi / 2.0
+    assert abs(follower.norm_ang(north - math.pi / 2.0)) < 1e-6
+
+
+def test_the_held_leg_is_built_on_the_yaw_at_the_SEND_and_not_the_cancel(
+        rig):
+    """DOOR 3 - cancel, then send, which is run-5's own boundary.
+
+    A tree change makes the adapter wait for the cancelled goal's
+    result before it sends (see _advance_to), and the truck KEEPS
+    MOVING through that wait. So the yaw that decides the heading is the
+    one at the send and not the one at the decision: here the truck
+    swings from -1.3 to -1.9 in between, which crosses the quarter turn
+    and changes the answer from 0.0 to pi.
+    """
+    _at_s1(rig, float(STATIONS["S1"]["yaw"]))
+    rig.route(OUT_OF_S1)
+    assert [leg.klass for leg in rig.adapter.legs] == [
+        nav2_legs.SPUR_EXIT, nav2_legs.TRANSIT]
+    rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.3)
+    rig.tick()
+    assert rig.adapter.pending_leg == 1
+    assert len(rig.action.goals) == 1
+    # the truck turns while the cancelled goal is still on the server
+    rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.9)
+    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
+    assert len(rig.action.goals) == 2
+    east = _goal_yaw(rig, 1)
+    assert abs(follower.norm_ang(east - math.pi)) < 1e-6
+    assert _turn(east, -1.9) <= math.pi / 2.0
+
+
+def test_the_same_held_leg_keeps_the_travel_direction_from_the_other_side(
+        rig):
+    _at_s1(rig, float(STATIONS["S1"]["yaw"]))
+    rig.route(OUT_OF_S1)
+    rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.9)
+    rig.tick()
+    rig.tf_at(-13.0, 10.0 - nav2_legs.PREEMPT_AT_M + 0.1, -1.3)
+    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
+    assert abs(follower.norm_ang(_goal_yaw(rig, 1))) < 1e-6
+
+
+def test_a_resume_re_goals_on_where_the_truck_is_now(driving):
+    """DOOR 4 - SAFETY-STOP holds the route and Motor True re-sends it.
+
+    The truck does not always stand still through a stop: the plant
+    decelerates it, and a tricycle that is still rolling with the wheel
+    over ends up somewhere else. The re-sent goal is built on the yaw at
+    the RESUME, which is the only one that is true.
+    """
+    assert len(driving.action.goals) == 1
+    driving.status(motor=False)
+    driving.tick()
+    assert driving.adapter.state.state == nav2_state.SAFETY_STOP
+    driving.tf_at(-17.0, 10.0, 0.1)
+    driving.status(motor=True)
+    driving.tick()
+    assert driving.adapter.state.state == nav2_state.EN_ROUTE
+    assert len(driving.action.goals) == 2
+    assert abs(follower.norm_ang(_goal_yaw(driving, 1))) < 1e-6
+    assert _turn(_goal_yaw(driving, 1), 0.1) <= math.pi / 2.0
+
+
+def test_a_resume_with_no_belief_waits_instead_of_guessing(driving):
+    """AND IT WAITS FOR ONE. A goal built without a heading is a heading
+    invented, which is the defect itself; the route is already HELD, so
+    the honest answer is to stay stopped until the picture is back."""
+    driving.status(motor=False)
+    driving.tick()
+    assert driving.adapter.state.state == nav2_state.SAFETY_STOP
+    # nothing fresh for longer than nav2_pose.SENSOR_STALE_S
+    driving.holder["t"] += 5.0
+    driving.status(motor=True)
+    driving.tick()
+    assert driving.adapter.state.state == nav2_state.SAFETY_STOP
+    assert len(driving.action.goals) == 1
+    # the belief comes back, and so does the truck
+    driving.tf_at(-17.0, 10.0, math.pi)
+    driving.tick()
+    assert driving.adapter.state.state == nav2_state.EN_ROUTE
+    assert len(driving.action.goals) == 2
+
+
+def test_every_goal_this_shell_builds_names_its_leg_in_the_log(rig):
+    """THE OBSERVABLE SEAM. A field run has to be able to quote the leg
+    table - class, tree and goal yaw against the yaw the truck was on -
+    and nothing else on this rig can reconstruct it: the goal that
+    leaves is in map coordinates and the class is not on any wire."""
+    lines = []
+    rig.node.get_logger = lambda: types.SimpleNamespace(
+        info=lines.append, warn=lines.append)
+    _at_s1(rig, float(STATIONS["S1"]["yaw"]))
+    rig.route(OUT_OF_S1)
+    assert len(lines) == 1
+    assert "leg 1/2" in lines[0]
+    assert nav2_legs.SPUR_EXIT in lines[0]
+    assert "nav.bt_xml_rpp" in lines[0]
+    assert "-1.571" in lines[0]
+
+
+# ----------------------------------------------------------------------
+# 10. DEFECT D9: a non-final leg nav2 calls DONE moves the queue on.
+#
+# Run 6, measured: bt_navigator answered a leg pair with "Goal
+# succeeded" 19 ms after it began navigating, 4 m short of the goal it
+# named - the displaced leg had been inside the 0.60 m checker before it
+# was sent. The adapter read SUCCEEDED for a NON-FINAL leg, had no
+# branch for it, and stood on the spot until its own ClosingWatch called
+# a stall that was really a lost goal: "blocked: no progress - best
+# 4.00 m, 30 s without closing", twice.
+#
+# nav2_legs no longer builds a leg that can be displaced in the tick it
+# is sent (D9's other half), so this is the belt over those braces: a
+# server that says a leg is finished is a server with nothing on it, and
+# the only honest answer is the next leg.
+# ----------------------------------------------------------------------
+def test_a_non_final_leg_that_nav2_calls_done_sends_the_next_one(
+        transiting):
+    assert len(transiting.action.goals) == 1
+    transiting.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED,
+        result=types.SimpleNamespace(error_code=0)))
+    assert len(transiting.action.goals) == 2
+    assert transiting.adapter.leg_i == 1
+    assert transiting.adapter.state.state == nav2_state.EN_ROUTE
+
+
+def test_the_last_leg_finishing_is_still_an_arrival_and_not_a_send(
+        driving):
+    """The final leg's SUCCEEDED is the arrival verdict and always was;
+    D9 must not turn it into a goal nobody asked for."""
+    driving.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0)
+    driving.tick()
+    driving.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
+    assert len(driving.action.goals) == 2
+    driving.tf_at(-13.0, 4.25)
+    driving.action.handles[1].result_future.fire(types.SimpleNamespace(
+        status=Messages.SUCCEEDED,
+        result=types.SimpleNamespace(error_code=0)))
+    assert driving.adapter.state.state == nav2_state.ARRIVED
+    assert len(driving.action.goals) == 2

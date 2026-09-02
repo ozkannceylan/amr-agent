@@ -134,6 +134,44 @@ MPPI_GOAL_THRESHOLD_M = 1.4
 #: off line without manufacturing a leg out of its parking error.
 COLLINEAR_RAD = math.radians(15.0)
 
+#: WHERE THE TWO CANDIDATE HEADINGS ARE THE SAME ROTATION AWAY, and it
+#: is arithmetic rather than a tuning knob. The two differ by pi, so for
+#: any delta in (-pi, pi], |wrap(delta + pi)| == pi - |delta| EXACTLY:
+#: "whichever of the two is the smaller rotation" is the single test
+#: |delta| < pi/2 - no second atan2, and no race between two magnitudes
+#: that differ by an ulp.
+QUARTER_TURN_RAD = math.pi / 2.0
+
+#: HOW WIDE THE TIE IS, AND IT IS A BAND AND NOT A POINT (defect D8,
+#: run6). At exactly a quarter turn the criterion above has NO OPINION,
+#: and on this floor that is not a corner case - it is EVERY junction.
+#: The waypoint graph's turns are all right angles and every spur meets
+#: its ring leg at one, so a truck standing at a spur mouth is at pi/2
+#: to the leg it is about to drive BY CONSTRUCTION, and what decides it
+#: is then the third decimal place of the localiser.
+#:   MEASURED, run 6: the five yaws the truck actually stood at when a
+#: ring leg was dispatched out of the S1 mouth were -1.550, -1.474,
+#: -1.565, -1.581 and -1.574 against a bay heading of -1.5708 - up to
+#: 0.097 rad out. The one that landed 0.021 rad on the wrong side of
+#: pi/2 was handed the travel direction, planned the turnaround, left
+#: the corridor to (-13.05, 11.35) and died on the watchdog: "blocked:
+#: no progress - best 13.06 m, 30 s without closing". That is D7's own
+#: defect reached through D7's own rule.
+#:   SO THE BAND IS COLLINEAR_RAD - the same tolerance this file already
+#: grants a truck's parking error when it asks whether two segments are
+#: the same straight line - and inside it the FLIP wins. Not by coin
+#: toss: the flip is the sense the truck is already driving in (it
+#: leaves a bay forks-first and runs the ring forks-first), and nav2's
+#: own direction-hold node refuses a fresh plan that flips the driving
+#: direction under way - "fresh plan flips the driving direction at
+#: |v| = 0.272 m/s ... keeping the accepted plan", bt_navigator, run 6 -
+#: so a goal that demands the other sense mid-leg is a goal that will
+#: not be driven at all.
+TIE_BAND_RAD = COLLINEAR_RAD
+
+#: The one comparison leg_yaw makes. Above this the pi-flip wins.
+FLIP_ABOVE_RAD = QUARTER_TURN_RAD - TIE_BAND_RAD
+
 #: HOW CLOSE COUNTS AS STANDING ON A STATION. follower.ARRIVE_M is the
 #: radius at which this same estimate LATCHED the arrival, so a truck
 #: that has just arrived is by construction inside it and no other
@@ -237,6 +275,54 @@ def _clean(polyline):
     return points
 
 
+def leg_length_m(points):
+    """How far the truck drives on this leg, along its own polyline."""
+    return sum(math.dist(points[index], points[index + 1])
+               for index in range(len(points) - 1))
+
+
+def _merge_short(chunks):
+    """Chunks with every non-final run shorter than P folded forward.
+
+    A LEG BORN INSIDE THE PREEMPT DISTANCE IS NOT A LEG (defect D9,
+    run6). PREEMPT_AT_M is the distance at which a leg is handed over,
+    so a run shorter than it is dispatched and superseded in the same
+    tick - two NavigateToPose goals at a SINGLE-goal server inside
+    41 ms - and bt_navigator answered that pair with one line:
+
+        Begin navigating from (-0.08, -0.10) to (-0.08, -0.15)
+        Received goal preemption request
+        Begin navigating from (-0.08, -0.10) to (-4.08, -0.16)
+        Goal succeeded                     <- 19 ms later, 4 m short
+
+    The 0.047 m goal was inside the 0.60 m goal checker before it was
+    sent, so the tree returned SUCCESS against the label of the goal
+    that had just displaced it, and the truck stood on its spawn node
+    until the adapter's own watchdog called it - twice, on 4 m of empty
+    aisle.
+      WHERE 0.047 m OF LEG COMES FROM: route.plan_route prepends the
+    truck's pose and keeps the entry node whenever the pose is nearer
+    THAT than the second node, so a truck standing just off its spawn is
+    handed both - and 0.047 m of parking error pointing north followed
+    by a ring leg pointing east is a TURN, which is exactly what
+    split_legs splits at. This is D5's sentence ("the parking error is
+    not a leg") stated where it can be enforced for every route and not
+    only for the one out of a bay.
+      FORWARD AND NOT BACKWARD, because the shared vertex is the next
+    leg's start and the goal must stay on the LAST segment - the ring
+    leg's heading, not the parking error's. The final chunk has nothing
+    after it and is left alone: the final leg is never preempted
+    (should_preempt), so being short costs it nothing.
+    """
+    merged = []
+    for points in chunks:
+        if merged and leg_length_m(merged[-1]) < PREEMPT_AT_M:
+            merged[-1] = merged[-1] + list(points[1:])
+        else:
+            merged.append(list(points))
+    return merged
+
+
 def split_legs(polyline):
     """The polyline as a list of point-lists, one per leg.
 
@@ -244,6 +330,9 @@ def split_legs(polyline):
     COLLINEAR_RAD, or when the vertex is a station spur foot. The vertex
     itself belongs to BOTH legs: it is the end of one goal and the start
     of the next, which is what makes the queue continuous.
+
+    Then every non-final run shorter than PREEMPT_AT_M is folded into
+    the one after it - see _merge_short, which is defect D9.
     """
     points = _clean(polyline)
     if len(points) < 2:
@@ -274,7 +363,7 @@ def split_legs(polyline):
             legs.append(current)
             current = [points[index]]
     legs.append(current)
-    return legs
+    return _merge_short(legs)
 
 
 def classify(leg_points, final):
@@ -328,7 +417,7 @@ def plan_legs(polyline):
     return legs
 
 
-def leg_yaw(leg, stations=STATIONS):
+def leg_yaw(leg, current_yaw=None, stations=STATIONS):
     """The heading the goal at this leg's end is approached on.
 
     A `Leg` carries its points and no heading, and SmacPlannerHybrid is
@@ -341,8 +430,36 @@ def leg_yaw(leg, stations=STATIONS):
     approach heading, because that is the heading the truck has to
     arrive on and the bay is not free to choose it. A SPUR EXIT ends on
     that SAME heading - the one it is standing on - because a spur is a
-    dead end and the truck cannot turn round in it. Every other leg ends
-    pointing along ITSELF, down the last segment it drove.
+    dead end and the truck cannot turn round in it. Every other leg -
+    every TRANSIT - ends pointing along itself OR along its own
+    reverse, whichever is the smaller rotation from where the truck is
+    pointing NOW, which is what `current_yaw` is for.
+
+    THE TRANSIT ROW IS DEFECT D7, MEASURED (run5, 2026-09-02), AND IT IS
+    D5's OWN MISTAKE ONE FLOOR UP. "Along the last segment" is ONE
+    heading for a vehicle that drives both ways: this model carries its
+    forks at body -x (SPEC_ADAPTER.md Decision 1's sign audit -
+    forks-first is NEGATIVE linear.x), so a goal yaw equal to the travel
+    direction is a goal that says COUNTERWEIGHT FIRST. The truck came
+    out of S1 northbound on the bay's heading, stood at the spur mouth
+    (-13.0, 10.0) on -1.75 with its forks north, and was handed goal yaw
+    0.0 for the eastbound ring leg - a demand to end up pointing
+    forks-WEST while driving east. Smac planned the turnaround: out of
+    the corridor to (-14.73, 8.65), north past the ring centreline to
+    (-12.13, 11.53), back to (-12.51, 9.63), and the closing watchdog
+    fired at 30 s. Six BLOCKEDs in one order and not one of them was a
+    floor that was not clear.
+      A FORKLIFT DOES NOT TURN ROUND TO GO SOMEWHERE. It drives the
+    other way, and the two goal poses that mean "drive along this leg"
+    differ by exactly pi. The rule picks the one already under the
+    truck; see FLIP_ABOVE_RAD for why that is one comparison and where
+    its tie goes.
+
+    WHY THE BAY'S TWO ROWS ARE NOT BIDIRECTIONAL. A station heading is
+    not a preference about which end goes first, it is the pose the bay
+    admits - 4.00 m wide, entered off the ring band, with the standoffs
+    in stations.py measured against one approach. The truck may drive it
+    forwards or backwards; it may not arrive rotated.
 
     THE SPUR EXIT ROW IS DEFECT D5, MEASURED (run4, 2026-09-02). The
     exit's last segment points north (+1.5708) and the truck is standing
@@ -383,7 +500,29 @@ def leg_yaw(leg, stations=STATIONS):
             "the leg ending at {!r} has no last segment, so it has no "
             "heading: split_legs drops zero-length segments, and a leg "
             "carrying one did not come from it".format(leg.end))
-    return math.atan2(leg.end[1] - tail[1], leg.end[0] - tail[0])
+    direction = math.atan2(leg.end[1] - tail[1], leg.end[0] - tail[0])
+    if current_yaw is None:
+        raise Nav2LegsError(
+            "the transit leg ending at {!r} was asked for its goal "
+            "heading without being told which way the truck is pointing, "
+            "and this file will not guess: a transit goal is the travel "
+            "direction OR its pi-flip, and only the truck's own yaw says "
+            "which (defect D7)".format(leg.end))
+    try:
+        delta = follower.norm_ang(direction - float(current_yaw))
+    except (TypeError, ValueError):
+        raise Nav2LegsError(
+            "the truck's current yaw is {!r}, which is not an angle, and "
+            "a goal heading decided off it would be a heading decided at "
+            "random".format(current_yaw))
+    if not math.isfinite(delta):
+        raise Nav2LegsError(
+            "the truck's current yaw is {!r}: a goal heading decided off "
+            "a non-finite belief is a goal sent at random"
+            .format(current_yaw))
+    if abs(delta) >= FLIP_ABOVE_RAD:
+        return follower.norm_ang(direction + math.pi)
+    return direction
 
 
 def should_preempt(distance_to_end_m, final):
@@ -447,10 +586,23 @@ def _selftest():
           and legs[0].tree_key == "nav.bt_xml")
     check("the spur ends on S5's own approach heading",
           abs(leg_yaw(legs[1]) - float(STATIONS["S5"]["yaw"])) < 1e-12)
-    check("a transit leg ends pointing along its last segment",
-          abs(leg_yaw(legs[0])
-              - math.atan2(legs[0].end[1] - legs[0].points[-2][1],
-                           legs[0].end[0] - legs[0].points[-2][0])) < 1e-12)
+    segment = math.atan2(legs[0].end[1] - legs[0].points[-2][1],
+                         legs[0].end[0] - legs[0].points[-2][0])
+    check("a transit leg ends pointing along its last segment when the "
+          "truck is already pointing that way",
+          abs(leg_yaw(legs[0], segment) - segment) < 1e-12)
+    # D7: the same leg, a truck facing the other way, and the goal that
+    # does NOT ask it to turn round in the aisle (run5, six BLOCKEDs).
+    backwards = follower.norm_ang(segment + math.pi)
+    check("and it ends pointing along its own REVERSE when that is the "
+          "smaller rotation - a forklift drives both ways (D7)",
+          abs(follower.norm_ang(leg_yaw(legs[0], backwards) - backwards))
+          < 1e-12)
+    check("the tie at a quarter turn goes to the flip, which is the spur "
+          "mouth of a truck that parked perfectly (D7)",
+          abs(follower.norm_ang(
+              leg_yaw(legs[0], follower.norm_ang(segment + FLIP_ABOVE_RAD))
+              - backwards)) < 1e-12)
 
     out = plan_legs(route.plan_route((7.0, 4.25), "S9"))
     check("leaving a station is a dead-astern SPUR EXIT",
@@ -465,17 +617,24 @@ def _selftest():
     parked = plan_legs([(-12.9968, 4.4952), (-13.0, 4.25), (-13.0, 10.0),
                         (-10.0, 10.0), (-7.0, 10.0)])
     exits = [leg for leg in parked if leg.klass == SPUR_EXIT]
-    check("the parking error is not the spur exit; the bay-to-mouth leg "
-          "is (D5)",
-          len(exits) == 1 and exits[0].start == (-13.0, 4.25)
+    check("the parking error is not a leg of its own, and the leg it is "
+          "folded into is the bay-to-mouth exit (D5, D9)",
+          len(exits) == 1 and exits[0].start == (-12.9968, 4.4952)
           and exits[0].end == (-13.0, 10.0)
           and abs(leg_yaw(exits[0]) - float(STATIONS["S1"]["yaw"])) < 1e-12)
+    check("no leg that can be preempted is born already inside P (D9)",
+          all(leg_length_m(leg.points) >= PREEMPT_AT_M
+              for leg in parked[:-1]))
     check("S5 -> S9 splits at every junction turn (five legs)",
           len(out) == 5 and out[-1].klass == STATION_SPUR)
 
-    straight = plan_legs(route.plan_route((7.0, 10.2), "S5"))
+    straight = plan_legs(route.plan_route((7.0, 12.0), "S5"))
     check("a straight run THROUGH a spur foot still splits there",
           len(straight) == 2 and straight[1].klass == STATION_SPUR)
+    close = plan_legs(route.plan_route((7.0, 10.2), "S5"))
+    check("... and from inside P it is ONE leg, the station spur, so the "
+          "0.25 m checker still decides the arrival (D9)",
+          len(close) == 1 and close[0].klass == STATION_SPUR)
 
     check("a doubled first point is not a leg boundary",
           len(split_legs([(0.0, 0.0), (0.0, 0.0), (5.0, 0.0)])) == 1)
@@ -501,6 +660,11 @@ def _selftest():
                        "a polyline with no length"),
                       (lambda: should_preempt(float("nan"), final=False),
                        "a non-finite distance"),
+                      (lambda: leg_yaw(legs[0]),
+                       "a transit leg asked for a heading without the "
+                       "truck's own yaw (D7)"),
+                      (lambda: leg_yaw(legs[0], float("nan")),
+                       "a transit heading decided off a non-finite yaw"),
                       (lambda: leg_yaw(Leg(points=[(0.0, 0.0), (0.0, 0.0)],
                                            start=(0.0, 0.0),
                                            end=(0.0, 0.0), klass=TRANSIT,

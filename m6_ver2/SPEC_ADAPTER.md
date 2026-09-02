@@ -398,3 +398,17 @@ allowed to change is `test_m6.py` where it pins the bringup child list
    leg's goal yaw is the travel direction OR its π-flip, whichever is
    the smaller rotation from the truck's current yaw. STATION legs keep
    the station heading; SPUR_EXIT keeps the bay heading (D5).
+
+4. **TRANSIT legs drive RPP (G1-C4 ruling, 2026-09-02, AMR-DEC-005
+   extended).** With the bidirectional yaw rule every transit leg is
+   forks-first — nav2-reverse, the reversal-heavy class AMR-DEC-005
+   moved off MPPI. Run-7 measured the m5v3 creep fingerprint verbatim
+   on these legs (4 plateaus, means 0.0816–0.0905 inside
+   EVIDENCE_STALL's 0.0777–0.0901 band; DSP holding flip plans; orbit
+   at the leg end; 6/10 BLOCKEDs). CLASS_TREE's TRANSIT row moves to
+   ("rpp", "nav.bt_xml_rpp") — the spec's own sanctioned fallback.
+   MPPI stays configured (FollowPath) but no leg class names it.
+   Weighed counter-evidence: m5v3's clean spawn straight measured MPPI
+   8/8 vs RPP 7/8 — but the measured incidence HERE is 6/10 against
+   ~1/8, and RPP's unrecovered lateral-excursion class stays NAMED
+   (the closing watchdog and the fleet's own requeue are its net).

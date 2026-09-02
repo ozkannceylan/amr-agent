@@ -462,7 +462,7 @@ class Adapter(object):
     def tick(self):
         now = self._now()
         world = self._believe(now)
-        self._safety(now)
+        self._safety(now, world)
         if world is not None:
             self._drive(now, world)
         self._publish_cmd(now)
@@ -490,7 +490,7 @@ class Adapter(object):
             return None
         return nav2_pose.to_world(self.frame, sample.x, sample.y, sample.yaw)
 
-    def _safety(self, now):
+    def _safety(self, now, world):
         """Motor False or a silent PLC. Cancel, hold, resume."""
         motor = self.motor and not is_stale(self.status_rx, now,
                                             STATUS_STALE_S)
@@ -500,10 +500,17 @@ class Adapter(object):
                 self._abandon_goal()
                 self.state.safety_stop()
             return
+        if world is None:
+            # MOTOR IS BACK AND THE PICTURE IS NOT. The route is already
+            # HELD, so the honest move is to stay stopped: a re-sent leg
+            # needs a goal heading and a goal heading needs the truck's
+            # own yaw (D7). The resume is a transition, not a deadline -
+            # it fires on the first tick that has a belief in it.
+            return
         if self.state.resume():
             # THE ROUTE WAS HELD, so there is a leg to re-send and no
             # operator ritual to perform.
-            self._send_leg(self.leg_i)
+            self._send_leg(self.leg_i, world[2])
 
     def _drive(self, now, world):
         """Preempt, watch and arrive - all three are core calls."""
@@ -518,7 +525,7 @@ class Adapter(object):
         if self.pending_leg is None \
                 and nav2_legs.should_preempt(distance, leg.final) \
                 and self.leg_i + 1 < len(self.legs):
-            self._advance_to(self.leg_i + 1)
+            self._advance_to(self.leg_i + 1, world[2])
             return
         if self.watch is not None:
             stalled = self.watch.step(now, distance)
@@ -557,9 +564,9 @@ class Adapter(object):
                     # nothing stops and `executing` never flickers.
                     self.leg_i = index
                     return
-        self._send_leg(0)
+        self._send_leg(0, self._world_yaw())
 
-    def _advance_to(self, index):
+    def _advance_to(self, index, current_yaw):
         """Leg `index` starts - through whichever of nav2's two doors
         this transition is allowed to use.
 
@@ -593,7 +600,7 @@ class Adapter(object):
         """
         if self.handle is None \
                 or self.legs[index].tree_key == self.legs[self.leg_i].tree_key:
-            self._send_leg(index)
+            self._send_leg(index, current_yaw)
             return
         self.pending_leg = index
         handle, self.handle = self.handle, None
@@ -605,26 +612,63 @@ class Adapter(object):
         handle.cancel_goal_async()
 
     def _send_pending(self):
-        """The held leg, now that nav2 has finished with the last one."""
+        """The held leg, now that nav2 has finished with the last one.
+
+        THE YAW IS READ HERE AND NOT AT THE PREEMPT. This method runs
+        from an action callback, an unknown time after _advance_to
+        decided - the truck has been decelerating into the leg end all
+        the while - so the goal is built on the pose it is standing at
+        now (D7).
+        """
         index, self.pending_leg = self.pending_leg, None
         if index is not None:
-            self._send_leg(index)
+            self._send_leg(index, self._world_yaw())
 
-    def _send_leg(self, index):
-        """One NavigateToPose goal, with a generation on it."""
+    def _send_leg(self, index, current_yaw):
+        """One NavigateToPose goal, with a generation on it.
+
+        `current_yaw` is the truck's believed heading at THIS instant,
+        and it is an argument rather than a lookup so that every door
+        into this method has to have one (SPEC_ADAPTER.md AMENDMENTS 3).
+        The policy - travel direction or its pi-flip, and which - is
+        nav2_legs'; this file only carries the number.
+        """
         if not self.legs:
             return
-        self.leg_i = index
         leg = self.legs[index]
+        if current_yaw is None and leg.klass == nav2_legs.TRANSIT:
+            # NO PICTURE, NO GOAL. Every door reads the live estimate
+            # first and the route is HELD while the belief is gone, so
+            # this is the belt over the braces - and it is not silent:
+            # the ClosingWatch _advance_to deliberately leaves running
+            # is the backstop that reports it as a stall.
+            self.node.get_logger().warn(
+                "leg {}/{} not sent: no believed yaw to build a transit "
+                "goal heading on".format(index + 1, len(self.legs)))
+            return
+        self.leg_i = index
         self.generation += 1
         generation = self.generation
         self.watch = nav2_watch.ClosingWatch(self.required_closing_m,
                                              self.closing_allowance_s)
+        goal_yaw = nav2_legs.leg_yaw(leg, current_yaw)
+        # THE LEG TABLE, ON THE RECORD. A goal that has left is in map
+        # coordinates and its class is on no wire at all, so without
+        # this line a field run cannot say which heading was asked for
+        # or why - which is exactly the evidence D7 was found in.
+        self.node.get_logger().info(
+            "leg {}/{} {} tree={} end=({:.2f}, {:.2f}) goal_yaw={:+.3f} "
+            "truck_yaw={} {}".format(
+                index + 1, len(self.legs), leg.klass, leg.tree_key,
+                leg.end[0], leg.end[1], goal_yaw,
+                "none" if current_yaw is None
+                else "{:+.3f}".format(current_yaw),
+                "" if current_yaw is None else "turn={:+.3f}".format(
+                    follower.norm_ang(goal_yaw - current_yaw))))
         goal = self.msgs.nav_goal(
             frame_id=self.map_frame,
             stamp=self.node.get_clock().now().to_msg(),
-            map_pose=self.frame.to_map(leg.end[0], leg.end[1],
-                                       nav2_legs.leg_yaw(leg)),
+            map_pose=self.frame.to_map(leg.end[0], leg.end[1], goal_yaw),
             behavior_tree=self.trees[leg.tree_key])
         future = self.action.send_goal_async(goal)
         future.add_done_callback(
@@ -664,6 +708,15 @@ class Adapter(object):
             return
         leg = self.legs[self.leg_i] if self.legs else None
         if leg is None or not leg.final:
+            # A NON-FINAL LEG NAV2 CALLS DONE IS A SERVER WITH NOTHING
+            # ON IT, and the only honest answer is the next leg (defect
+            # D9, run6). Before this branch existed the adapter simply
+            # returned: no goal running, no goal pending, and the
+            # ClosingWatch counting down to a stall that was really a
+            # lost goal - "blocked: no progress - best 4.00 m, 30 s
+            # without closing", twice, on 4 m of empty aisle.
+            if leg is not None and self.leg_i + 1 < len(self.legs):
+                self._advance_to(self.leg_i + 1, self._world_yaw())
             return
         if self.state.state == nav2_state.ARRIVED:
             return
@@ -794,12 +847,28 @@ class Adapter(object):
 
     # ------------------------------ helpers ------------------------------
 
-    def _world_xy(self):
+    def _world_pose(self):
+        """(x, y, yaw) in m6 world coordinates, or None."""
         sample = nav2_pose.compose(self.map_odom, self.odom_base)
         if sample is None:
             return None
-        pose = nav2_pose.to_world(self.frame, sample.x, sample.y, sample.yaw)
-        return (pose[0], pose[1])
+        return nav2_pose.to_world(self.frame, sample.x, sample.y, sample.yaw)
+
+    def _world_xy(self):
+        pose = self._world_pose()
+        return None if pose is None else (pose[0], pose[1])
+
+    def _world_yaw(self):
+        """WHICH WAY THE TRUCK IS POINTING, RIGHT NOW.
+
+        Read at the instant a goal is BUILT and never carried from an
+        earlier one: between the decision to send a leg and the send
+        itself the truck is still driving (see _advance_to's cancel
+        branch, which waits for a result), and a heading chosen for a
+        pose the truck has left is defect D7 with a different hat on.
+        """
+        pose = self._world_pose()
+        return None if pose is None else pose[2]
 
 
 # ----------------------------------------------------------------------
