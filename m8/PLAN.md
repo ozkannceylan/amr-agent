@@ -26,6 +26,7 @@ m8/
                    test_no_frames_leave.py  (R3: no image topic in any bridge config)
                    test_plc_isolation.py    (R4: no M8 topic in any PLC link)
   launch/          m8_shadow.launch.py  m8_gated.launch.py
+  EVIDENCE_H0.md   (A0 gate: pytest m8/tests, no ROS)
   EVIDENCE_M8_*.md (one per bench, m5-ver3 style, numbers cite files)
 ```
 

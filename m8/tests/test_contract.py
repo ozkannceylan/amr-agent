@@ -94,7 +94,7 @@ def test_every_c2_abort_reason_is_accepted_and_no_others():
     for reason in ABORT_REASONS:
         make_proposal(KIND_DOCK_ABORT, reason, 0.5, _ev(), 200)
     with pytest.raises(ContractError, match="unknown abort reason"):
-        make_proposal(KIND_DOCK_ABORT, "proceed", 0.5, _ev(), 200)
+        make_proposal(KIND_DOCK_ABORT, "not_a_reason", 0.5, _ev(), 200)
 
 
 def test_slot_table_rows_and_states():

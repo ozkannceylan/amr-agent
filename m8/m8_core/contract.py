@@ -300,11 +300,18 @@ def is_expired(proposal: Proposal, now_s: float) -> bool:
 
 
 def remaining_ttl_ms(proposal: Proposal, now_s: float) -> int:
-    """Milliseconds still to live. Zero once expired (never negative)."""
+    """Milliseconds still to live. Zero once expired (never negative).
+
+    Elapsed time is computed in milliseconds so a 1 ms remainder is not
+    lost to `0.001 * 1000` floating-point noise.
+    """
     if is_expired(proposal, now_s):
         return 0
-    left = proposal.expiry_stamp() - float(now_s)
-    return max(0, int(math.floor(left * 1000.0)))
+    elapsed_ms = (float(now_s) - float(proposal.evidence.sim_stamp)) * 1000.0
+    left = int(proposal.ttl_ms) - elapsed_ms
+    if left <= 0:
+        return 0
+    return int(math.floor(left + 1e-9))
 
 
 # ---------------------------------------------------------------------------
