@@ -220,7 +220,6 @@ class Gate:
             body.get("taskId"), str) else None
         schema_errors = sorted(
             self._submit.iter_errors(body), key=lambda e: list(e.path))
-        )
         if not key or schema_errors:
             return self._close(
                 proposal, REJECTED_SCHEMA, when,

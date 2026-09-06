@@ -303,41 +303,53 @@ def _parse_json(payload):
 
 
 def build_mcp(gateway: Gateway):
-    """Wrap the official MCP server library. Only this function imports it."""
+    """Wrap the official MCP server library. Only this function imports it.
+
+    `from` is a reserved word in Python, so propose_transport is registered
+    with an explicit argument model whose JSON name is still `from` — the
+    name ARCHITECTURE.md §3 gives the tool.
+    """
     from mcp.server import MCPServer
+    from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase
+    from pydantic import Field, create_model
+
+    from gateway.tools import PROPOSE_INPUT
 
     mcp = MCPServer("m7-gateway")
 
-    @mcp.tool(name="get_fleet_status",
-              description=TOOLS[0]["description"])
     def get_fleet_status() -> dict:
         return dispatch(gateway, "get_fleet_status", {})
 
-    @mcp.tool(name="list_stations",
-              description=TOOLS[1]["description"])
     def list_stations() -> dict:
         return dispatch(gateway, "list_stations", {})
 
-    @mcp.tool(name="propose_transport",
-              description=TOOLS[2]["description"])
-    def propose_transport(reason: str, idempotency_key: str, to: str,
-                          **kwargs) -> dict:
-        # `from` is a reserved word; the JSON schema still names it `from`.
-        origin = kwargs.get("from")
-        return dispatch(gateway, "propose_transport", {
-            "from": origin,
-            "to": to,
-            "reason": reason,
-            "idempotency_key": idempotency_key,
-        })
+    def propose_transport(**arguments) -> dict:
+        return dispatch(gateway, "propose_transport", arguments)
 
-    @mcp.tool(name="get_proposal",
-              description=TOOLS[3]["description"])
     def get_proposal(proposal_id: str) -> dict:
         return dispatch(gateway, "get_proposal", {
             "proposal_id": proposal_id,
         })
 
+    mcp.add_tool(get_fleet_status, description=TOOLS[0]["description"])
+    mcp.add_tool(list_stations, description=TOOLS[1]["description"])
+    mcp.add_tool(propose_transport, description=TOOLS[2]["description"])
+    mcp.add_tool(get_proposal, description=TOOLS[3]["description"])
+
+    tool = mcp._tool_manager._tools["propose_transport"]
+    propose_args = create_model(
+        "ProposeTransportArguments",
+        __base__=ArgModelBase,
+        **{
+            "from": (str, Field(description="Pickup station id")),
+            "to": (str, Field(description="Drop-off station id")),
+            "reason": (str, Field(
+                description="Model text; stored, never parsed by the gate")),
+            "idempotency_key": (str, Field(description="Idempotency key")),
+        },
+    )
+    tool.fn_metadata.arg_model = propose_args
+    tool.parameters = PROPOSE_INPUT
     return mcp
 
 

@@ -98,15 +98,17 @@ def test_g2_every_transition_has_an_audit_row(tmp_path):
     gate = _gate(tmp_path)
     schema = _propose(gate, "s", from_station="")
     policy = _propose(gate, "p", from_station="S99")
+    # Keep at most one PENDING at a time so the per-client cap (3)
+    # cannot hide the later edges.
     pending = _propose(gate, "ok")
-    other = _propose(gate, "ok2")
-    human = _propose(gate, "ok3")
-    fail = _propose(gate, "ok4")
     gate.apply_decision(pending.proposal.proposal_id, "approve", "m7-approve")
     gate.complete_forward(pending.proposal.proposal_id, True, forward_rc=0)
+    human = _propose(gate, "ok3")
     gate.apply_decision(human.proposal.proposal_id, "reject", "m7-approve")
+    fail = _propose(gate, "ok4")
     gate.apply_decision(fail.proposal.proposal_id, "approve", "m7-approve")
     gate.complete_forward(fail.proposal.proposal_id, False, forward_rc="no_ack")
+    other = _propose(gate, "ok2")
     gate._clock_state["t"] = other.proposal.created_ts + gate.policy.proposal_ttl_s
     gate.expire_due()
 

@@ -155,6 +155,41 @@ def test_g1_static_boundary_check_passes():
     assert "passed" in completed.stdout
 
 
+def test_mcp_propose_transport_schema_names_from(tmp_path):
+    import asyncio
+
+    from gateway.server import build_mcp
+
+    gw = _gateway(tmp_path)
+    mcp = build_mcp(gw)
+
+    async def _list():
+        return await mcp.list_tools()
+
+    tools = {tool.name: tool for tool in asyncio.run(_list())}
+    assert set(tools) == set(TOOL_NAMES)
+    schema = tools["propose_transport"].input_schema
+    assert "from" in schema["properties"]
+    assert set(schema["required"]) == {"from", "to", "reason", "idempotency_key"}
+    assert "kwargs" not in schema["properties"]
+
+    gw.accept_status(json.dumps({"ts": gw.now(), "manager": "ONLINE"}))
+
+    async def _call():
+        return await mcp.call_tool("propose_transport", {
+            "from": "S1",
+            "to": "S4",
+            "reason": "via mcp",
+            "idempotency_key": "k-mcp",
+        })
+
+    called = asyncio.run(_call())
+    assert called.is_error is False
+    payload = json.loads(called.content[0].text)
+    assert payload["verdict"] == PENDING
+    assert payload["proposal"]["from"] == "S1"
+
+
 def test_phase1_tool_surface_is_exactly_the_four():
     assert TOOL_NAMES == (
         "get_fleet_status",
