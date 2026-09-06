@@ -35,7 +35,7 @@ m8/
 | Phase | Deliverable | Consumes anything? | Gate |
 |---|---|---|---|
 | A0 | `m8_core` pure modules + tests; `Proposal.msg`; `vda_map` for `errors` / `information` | no | H0: contract tests green, no ROS. **Landed 2026-09-06** on a branch cut from `m5-ver3-close`. |
-| A1 | **shadow mode**: C1 classical pocket pose + C2 abort + C3 slot state publish Proposals; gate logs and refuses everything; E1, E3, E4, E5 run | no (R1) | H1: E1 number vs tag, E3 recall/false-abort, E5 RTF cost, all written to EVIDENCE files |
+| A1 | **shadow mode**: C1 classical pocket pose + C2 abort + C3 slot state publish Proposals; gate logs and refuses everything; E1, E3, E4, E5 run | no (R1) | H1: E1 number vs tag, E3 recall/false-abort, E5 RTF cost, all written to EVIDENCE files. **Offline 2026-09-06**: nodes + launch + synthetic tests green. **H1 plant benches NOT_RUN.** |
 | B | **abort live**: gate accepts DOCK_ABORT only (fail-safe direction); E3 re-run on the live cycle; E2 no-regression | abort only | H2: dock plugin still 5/5 on clean cycles; aborts on the fault set |
 | C | **refine live**: delta box fixed from E1; DOCK_TARGET_REFINE accepted inside it; E2 full | refine inside box | H3: no regression on dock truth; strict class reported |
 | D | C3 slot table flows to `state.information`, visible in `fleet/status` and the M7 console; `test_no_frames_leave`, `test_plc_isolation` | reporting only | H4: seam proven: only numbers cross, PLC link untouched |
@@ -46,11 +46,13 @@ Phase order is fixed. A1 runs before any consumer exists, and B accepts
 only the fail-safe direction. Nothing in M8 ever moves the F-PLC column
 of the veto matrix off "orthogonal" (R4).
 
-## Remaining after A0 (H0)
+## Remaining after A1 offline
 
-A0 does not start A1. Still open, in PLAN order:
+A1 shadow nodes and launch are in the tree. H1 is **not** closed: E1/E3/E4/E5
+need the m5-ver3 plant. Still open, in PLAN order:
 
-- [ ] A1 shadow nodes (`m8_nodes/`) + benches E1/E3/E4/E5 + `EVIDENCE_M8_*`
+- [x] A1 offline: `m8_nodes/` + `launch/m8_shadow.launch.py` + synthetic tests
+- [ ] A1 plant: E1/E3/E4/E5 on gz + `EVIDENCE_M8_*` filled with measured numbers
 - [ ] B abort live (gate accepts `DOCK_ABORT` only)
 - [ ] C refine live (delta box fixed from E1)
 - [ ] D `state.information` to fleet / M7; isolation tests stay green

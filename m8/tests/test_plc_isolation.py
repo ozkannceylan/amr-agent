@@ -121,10 +121,12 @@ def test_plc_link_python_does_not_subscribe_or_import_m8():
     assert hits == [], hits
 
 
-def test_m8_core_does_not_import_plc_or_opcua():
+def test_m8_core_and_nodes_do_not_import_plc_or_opcua():
     banned = {"asyncua", "opcua", "plc_link", "amr_bridge"}
     hits = []
-    for path in sorted((_M8 / "m8_core").glob("*.py")):
+    paths = list((_M8 / "m8_core").glob("*.py"))
+    paths += list((_M8 / "m8_nodes").glob("*.py"))
+    for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             names = []

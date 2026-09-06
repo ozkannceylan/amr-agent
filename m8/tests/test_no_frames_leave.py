@@ -142,6 +142,12 @@ def test_m8_core_does_not_import_image_or_ros_types():
     assert hits == [], hits
 
 
+def test_m8_publish_topics_are_not_image_topics():
+    from m8_core.topics import PUBLISH_TOPICS
+    for topic in PUBLISH_TOPICS:
+        assert not _looks_like_image_topic(topic), topic
+
+
 def test_vda_map_fragments_are_numbers_and_enums_only():
     from m8_core.contract import Evidence, KIND_DOCK_ABORT, make_proposal
     from m8_core.vda_map import to_vda
