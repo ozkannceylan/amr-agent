@@ -74,6 +74,11 @@ class PocketObservation:
     valid: int
 
 
+# Pockets are deeper than the face. The first LS pass includes them
+# and pulls c long; the second drop is this residual. Not a plant bar.
+FACE_DEEPER_RESIDUAL_M = 0.05
+
+
 def _col_median(frame: DepthFrame, u: int, v0: int, v1: int) -> Optional[float]:
     vals = []
     for v in range(v0, v1):
@@ -86,34 +91,20 @@ def _col_median(frame: DepthFrame, u: int, v0: int, v1: int) -> Optional[float]:
     return vals[len(vals) // 2]
 
 
-def fit_face_plane(frame: DepthFrame) -> Optional[Tuple[float, float, float, int]]:
-    """Least-squares z = a*x + b*y + c on the central band.
-
-    x,y are optical-frame pixels scaled by 1/fx, 1/fy (dimensionless).
-    Returns (a, b, c, n) or None.
-    """
-    v0 = frame.height // 4
-    v1 = (3 * frame.height) // 4
-    u0 = frame.width // 6
-    u1 = (5 * frame.width) // 6
-    # Normal equations for z = a x + b y + c
+def _least_squares_plane(points: Sequence[Tuple[float, float, float]]
+                         ) -> Optional[Tuple[float, float, float, int]]:
+    """Least-squares z = a x + b y + c. points are (x, y, z)."""
     sxx = sxy = sx = syy = sy = sz = sxz = syz = n = 0.0
-    for v in range(v0, v1):
-        for u in range(u0, u1):
-            z = frame.at(u, v)
-            if z is None:
-                continue
-            x = (u - frame.cx) / frame.fx
-            y = (v - frame.cy) / frame.fy
-            sxx += x * x
-            sxy += x * y
-            sx += x
-            syy += y * y
-            sy += y
-            sz += z
-            sxz += x * z
-            syz += y * z
-            n += 1.0
+    for x, y, z in points:
+        sxx += x * x
+        sxy += x * y
+        sx += x
+        syy += y * y
+        sy += y
+        sz += z
+        sxz += x * z
+        syz += y * z
+        n += 1.0
     if n < 12:
         return None
     # 3x3 solve via Cramer's rule on
@@ -135,6 +126,37 @@ def fit_face_plane(frame: DepthFrame) -> Optional[Tuple[float, float, float, int
              - sxy * (sxy * sz - syz * sx)
              + sxz * (sxy * sy - syy * sx))
     return det_a / det, det_b / det, det_c / det, int(n)
+
+
+def fit_face_plane(frame: DepthFrame) -> Optional[Tuple[float, float, float, int]]:
+    """Least-squares z = a*x + b*y + c on the central band.
+
+    x,y are optical-frame pixels scaled by 1/fx, 1/fy (dimensionless).
+    Two passes: the second drops points deeper than the first plane so
+    EUR-pallet pockets do not pull the intercept. Returns (a, b, c, n)
+    or None.
+    """
+    v0 = frame.height // 4
+    v1 = (3 * frame.height) // 4
+    u0 = frame.width // 6
+    u1 = (5 * frame.width) // 6
+    pts = []
+    for v in range(v0, v1):
+        for u in range(u0, u1):
+            z = frame.at(u, v)
+            if z is None:
+                continue
+            x = (u - frame.cx) / frame.fx
+            y = (v - frame.cy) / frame.fy
+            pts.append((x, y, z))
+    first = _least_squares_plane(pts)
+    if first is None:
+        return None
+    a, b, c, _n = first
+    kept = [(x, y, z) for x, y, z in pts
+            if z <= (a * x + b * y + c) + FACE_DEEPER_RESIDUAL_M]
+    second = _least_squares_plane(kept)
+    return second if second is not None else first
 
 
 def find_pockets(frame: DepthFrame,

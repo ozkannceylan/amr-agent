@@ -145,6 +145,18 @@ def test_a_refine_outside_the_delta_box_is_named():
     assert v.checks["inside_delta_box"] is False
 
 
+def test_no_configured_box_is_not_outside_the_box():
+    # A1 ships before E1 names a box. Phase A still refuses; the
+    # reason is the shadow rule, not a box that does not exist.
+    gate = Gate(phase=PHASE_A, delta_box=None)
+    v = gate.evaluate(_refine(dx=0.20, dy=0.00, dtheta=0.00),
+                      now_s=10.05, health=healthy())
+    assert v.accepted is False
+    assert v.reason == REASON_PHASE_A_SHADOW
+    assert v.checks["inside_delta_box"] is True
+    assert v.checks["delta_box"] is None
+
+
 def test_a_monotone_violation_is_named():
     gate = Gate(phase=PHASE_A, delta_box=BOX)
     first = _refine(dx=0.02, dy=0.00, dtheta=0.02)

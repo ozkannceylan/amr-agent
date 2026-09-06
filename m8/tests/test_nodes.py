@@ -3,7 +3,6 @@ import ast
 from pathlib import Path
 
 from m8_core.pocket import make_plane_depth
-from m8_core.topics import CAM_DEPTH, HEALTH, LOG, PROPOSAL, VERDICT
 from m8_core.wire import loads_proposal
 from m8_nodes.abort_node import proposal_json_from_depth as abort_json
 from m8_nodes.m8_health import placeholder_health, unmeasured_health
@@ -80,17 +79,21 @@ def _inside(node, parent):
 
 
 def test_node_sources_publish_only_m8_number_topics():
-    allowed_pub = {PROPOSAL, VERDICT, HEALTH, LOG}
     for path in list(_NODES.glob("*_node.py")) + [_NODES / "m8_health.py"]:
         text = path.read_text(encoding="utf-8")
         assert "create_publisher" in text, path.name
         assert "Image" not in text.split("create_publisher")[1][:80]
         # The depth Image type may be imported for subscribe, never published.
         if "create_subscription" in text and "Image" in text:
-            assert CAM_DEPTH in text
+            # Thin wrappers import the on-truck name from topics.py;
+            # they must not subscribe the colour stream.
+            assert "CAM_DEPTH" in text, path.name
+            assert "CAM_IMAGE" not in text, path.name
         for banned in ("/forklift/cmd", "/forklift/safety", "cmd_vel",
                        "opcua", "asyncua"):
             assert banned not in text, (path.name, banned)
-        # Every publisher target is one of the four M8 wires.
+        # Every publisher target is one of the four M8 wires
+        # (imported as names from topics.py).
         if "create_publisher" in text:
-            assert any(t in text for t in allowed_pub)
+            assert any(name in text for name in
+                       ("PROPOSAL", "VERDICT", "HEALTH", "LOG")), path.name

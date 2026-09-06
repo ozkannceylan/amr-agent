@@ -200,7 +200,9 @@ class Gate:
         checks["monotone_violations"] = list(monotone_violations(prior, proposal))
 
         if self.delta_box is None:
-            checks["inside_delta_box"] = proposal.kind != KIND_DOCK_TARGET_REFINE
+            # No box yet (A0/A1 until E1 names one). The check does
+            # not fail; Phase A still refuses. Logged as unused.
+            checks["inside_delta_box"] = True
             checks["delta_box"] = None
         else:
             checks["inside_delta_box"] = self.delta_box.contains(proposal)

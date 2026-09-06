@@ -149,9 +149,11 @@ def scorable_proposal(proposal: Proposal) -> dict:
 
 def decode_depth_32fc1(data: bytes, width: int, height: int,
                        step: Optional[int] = None) -> tuple:
-    """Unpack a sensor_msgs/Image 32FC1 buffer to row-major floats.
+    """Unpack a 32FC1 depth buffer to row-major metres.
 
-    Used by the rclpy shells. Tests feed a tuple of floats directly.
+    Layout is row-major float32 with an optional row stride — the same
+    packing the on-truck depth image uses. rclpy shells pass msg.data
+    here. Tests feed a tuple of floats and skip this helper.
     """
     import struct
     if width <= 0 or height <= 0:

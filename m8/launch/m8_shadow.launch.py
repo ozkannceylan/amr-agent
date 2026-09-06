@@ -1,7 +1,7 @@
 """m8_shadow.launch.py — Phase A1 shadow. Proposals only; gate refuses all.
 
-Does not start Gazebo. Does not start a dock consumer. Does not start
-the speed arbiter (Phase E) or m8_gated (Phase B+).
+Does not start the plant. Does not start a dock consumer. Does not start
+the speed arbiter (Phase E) or the later gated launch (Phase B+).
 
 The five A1 shells are plain python3 files, same pattern as
 m5_ver3/nodes/*. ROS 2 launch is optional glue; pytest reads this
