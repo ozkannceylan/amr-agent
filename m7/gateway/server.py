@@ -357,6 +357,7 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     host = MQTT_HOST
     port = MQTT_PORT
+    mqtt_only = "--mqtt-only" in argv
     if "--host" in argv:
         host = argv[argv.index("--host") + 1]
     if "--port" in argv:
@@ -370,7 +371,12 @@ def main(argv=None) -> int:
     gateway = Gateway(gate, host=host, port=port)
     gateway.start_mqtt()
     try:
+        if mqtt_only:
+            while True:
+                time.sleep(1.0)
         build_mcp(gateway).run()
+    except KeyboardInterrupt:
+        return 0
     finally:
         gateway.stop_mqtt()
     return 0
