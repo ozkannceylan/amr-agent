@@ -22,35 +22,32 @@ architecture decision is made in the four documents below.
 5. Vault research these rest on: `obsidian-vault` branch
    `claude/m7-fleet-protocol-research-hnxsfo`, `projects/active/amr-agent/m7/fable/*`.
 
-## Ownership policy — OWNER TO REFINE
+## Ownership policy (owner ruling, 2026-09-06)
 
-The 2026-09-06 message that was to carry this policy arrived empty in
-the session. What follows is drafted from the standing rules in ADR
-0001, `m6/fleet/README.md`, the vault brief, and tonight's rulings.
-Ozkan refines; until then this text binds.
+1. **Heavy implementation goes to Cursor** until the Claude weekly reset.
+   Reset per the banner: **Mon Sep 7, 17:00**. The earlier Tuesday
+   estimate is obsolete.
+2. **Escalation path for a hard blocker.** If Cursor hits a blocker it
+   cannot resolve and any Fable / Claude quota remains, escalate that
+   specific stuck question back to **this session**
+   (`session_01DsWiT7rpWpEp7JBWFBeXym`) as **consult-only**. Not to Ozkan.
+3. **After the weekly reset**, Fable may resume heavy work if needed.
+4. **No mid-flight question relay to Ozkan.** Sessions decide from the
+   vault, the locked rulings, and the four documents above.
 
-- **`m6/` and m6-ver2** are owned by the separate live m6-ver2 session.
-  No other session edits under `m6/` until that track closes. M7 Phase
-  2b (one `fleet_cli` subcommand registration) waits for that close.
-- **`m7/`** is owned by whichever session holds the M7 implementation
-  brief. It edits only `m7/`; its only planned touch outside is Phase 2b.
-  It never edits `m5_ver3/`, `m8/`, `plc/`, `beckhoff/`, `bridge/`.
-- **`m8/`** is owned by whichever session holds the M8 implementation
-  brief, on a branch cut from the m5-ver3 plant branch. It edits `m8/`
-  and only the m5_ver3 launch/bringup lines needed to start M8 beside
-  the vehicle stack; every such line is listed in the phase's EVIDENCE
-  file. It never edits `plc/`, `beckhoff/`, `bridge/`, `m6/`, `m7/`.
-- **Safety chain files** (`plc/`, `beckhoff/`, F-program, `docs/safety/`)
-  are owner-only. No M7 or M8 change touches them. R4: the F-PLC never
-  receives M8 input.
-- **ADRs and invariants**: a change to any ADR 0001 invariant needs a new
-  owner-approved ADR first. M7 and M8 as decided need none.
-- **Decisions** (AMR-DEC-*) are the owner's. Sessions record findings
-  and propose; they do not rule.
-- **Commits**: no AI trailer, no model identifiers, per owner
-  instruction 2026-09-06. Commit messages name the phase and gate.
-- **Vault**: `obsidian-vault` mirrors decisions after they land in the
-  repo, not before. The canonical vault is the owner's box copy.
+Standing boundaries that remain in force under that policy:
+
+- `m6/` and m6-ver2 belong to the separate live m6-ver2 session. M7
+  Phase 2b (one `fleet_cli` subcommand registration) waits for that
+  track to close.
+- `m7/` and `m8/` each edit only their own tree; M8 may add the m5_ver3
+  launch lines needed to start beside the vehicle stack, listed in the
+  phase's EVIDENCE file.
+- Safety chain files (`plc/`, `beckhoff/`, F-program, `docs/safety/`)
+  are owner-only. R4: the F-PLC never receives M8 input.
+- ADR 0001 invariants change only through a new owner-approved ADR.
+  M7 and M8 as decided need none.
+- Commits carry no AI trailer and no model identifiers.
 
 ## Exact next tasks (in order)
 
@@ -86,7 +83,7 @@ M8 (needs the m5-ver3 plant; cut branch from the branch carrying `m5_ver3/`):
 - [ ] Vault sync: copy `m7/` and `m8/` architecture summaries into the
       vault under `projects/active/amr-agent/{m7,m8}/` and update
       `wiki/entities/projects/amr-agent.md` with M7 and M8 rows
-- [ ] Owner: refine the ownership policy above; confirm branch base for
+- [ ] Owner: confirm branch base for
       M8 implementation (`m5-ver3-close` assumed)
 
 ## Standing cautions (repeat in every derived artifact)
