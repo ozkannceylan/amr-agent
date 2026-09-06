@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://amr-agent.local/m7/schemas/proposal.schema.json",
+  "title": "M7 proposal record",
+  "description": "One proposal as the gateway stores it and as fleet/proposals mirrors the pending set.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "proposal_id",
+    "client_id",
+    "from",
+    "to",
+    "reason",
+    "idempotency_key",
+    "state",
+    "created_ts",
+    "task_id"
+  ],
+  "properties": {
+    "proposal_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "client_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "from": {
+      "type": "string"
+    },
+    "to": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "RECEIVED",
+        "REJECTED_SCHEMA",
+        "REJECTED_POLICY",
+        "PENDING",
+        "EXPIRED",
+        "REJECTED_HUMAN",
+        "APPROVED",
+        "FORWARDED",
+        "FORWARD_FAILED"
+      ]
+    },
+    "created_ts": {
+      "type": "number"
+    },
+    "task_id": {
+      "type": ["string", "null"]
+    },
+    "policy_rule": {
+      "type": ["string", "null"]
+    },
+    "decided_by": {
+      "type": ["string", "null"]
+    },
+    "forward_rc": {
+      "type": ["string", "integer", "null"]
+    }
+  }
+}

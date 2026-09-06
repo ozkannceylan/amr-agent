@@ -1,0 +1,34 @@
+# Phase 1 policy. Plain data. Nothing here reads a vehicle.
+# Station names match m6/ipc/stations.py so list_stations() is the
+# table the fleet already uses; this file is the allowlist, not an
+# import of the vehicle graph.
+schema_version: "1"
+
+stations:
+  S1: PICK-NW-1
+  S2: PICK-NW-2
+  S3: PICK-SW-1
+  S4: PICK-SW-2
+  S5: PICK-NE-1
+  S6: PICK-NE-2
+  S7: PICK-SE-1
+  S8: PICK-SE-2
+  S9: DOCK-DOOR
+  S10: CHARGE-1
+  S11: CHARGE-2
+  S12: CONVEYOR
+
+# The manager's own promise (fleet_cli.STATUS_PERIOD_S / STALE_AFTER_S):
+# republish at least every 2 s; three missed periods means it is gone.
+status_period_s: 2.0
+stale_after_s: 6.0
+
+# TTL is the PENDING -> EXPIRED edge in ARCHITECTURE.md §4.
+proposal_ttl_s: 300
+
+max_pending_per_client: 3
+max_proposals_per_minute: 6
+
+# G3: only this client id may publish fleet/proposal/decision.
+authorised_deciders:
+  - m7-approve

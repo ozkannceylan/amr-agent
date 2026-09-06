@@ -1,0 +1,7 @@
+# M7 Phase 1 — pinned so a library swap cannot silently change the gate.
+# anthropic is console-only (Phase 3); the gateway and gate never import it.
+paho-mqtt==2.1.0
+jsonschema==4.26.0
+mcp==2.1.1
+anthropic==0.68.0
+PyYAML>=6.0.1,<7

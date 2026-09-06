@@ -61,3 +61,6 @@ m6/deploy/
 m6/logs/
 m6/.m6_pids
 .archive
+
+# M7 audit trail is append-only runtime output, rotated by date.
+m7/audit/*.jsonl
