@@ -195,6 +195,11 @@ latest every 30 s. Header per section 3, plus:
 | errors[].errorLevel | enum WARNING / FATAL | yes | FATAL = not in running condition |
 | errors[].errorDescription, .errorHint | string | no | Diagnostics |
 | errors[].errorReferences[].referenceKey, .referenceValue | string | yes (in item) | e.g. orderId/actionId the error refers to |
+| information | array | no | Debug/visualization channel; spec forbids using it for control logic. **M6 does not send it.** M8 maps `m8.slotState` here (amendment 2026-09-11) |
+| information[].infoType | string | yes (in item) | Extension point (section 9); M8: `m8.slotState` |
+| information[].infoLevel | enum INFO / DEBUG | yes (in item) | M8 produces INFO |
+| information[].infoDescription | string | no | Diagnostics |
+| information[].infoReferences[].referenceKey, .referenceValue | string | yes (in item) | e.g. slot id → empty / occupied / blocked |
 | actionStates | array | yes | One entry per received action, keyed by actionId |
 | actionStates[].actionId | string | yes | Matches action from order/instantActions |
 | actionStates[].actionType | string | no | Informational |
@@ -217,7 +222,6 @@ stop assigning orders and to alert an operator.
 | zoneSetId | No zone sets (see order) |
 | distanceSinceLastNode | Line-guided vehicle field |
 | loads (loadId, loadType, …) | No load identification hardware in scope; revisit when load handling opens |
-| information | Debug/visualization channel; spec forbids using it for control logic; no consumer |
 | nodeStates[].nodePosition, nodeStates[].nodeDescription, edgeStates[].edgeDescription, edgeStates[].trajectory | Debug echo of order content; no consumer |
 | batteryState.batteryVoltage, .batteryHealth, .reach | Not needed for charging decisions |
 | agvPosition.deviationRange, .mapDescription | Logging-only, no consumer |
@@ -346,21 +350,25 @@ extension points, per the standard itself:
 | `actionParameters` on standard actions | Spec 6.8: "Additional parameters can be defined, if they are needed" | Allowed; every added key must be documented here before use |
 | Manufacturer-defined actions | Spec 6.8: manufacturer can define additional actions if no predefined action maps | Allowed as last resort; must be declared in `factsheet.protocolFeatures.agvActions` and documented here |
 | `errors[].errorType` values, `errorReferences` | Free string + reference list by design | Project error names use PascalCase, documented here before use |
-| `information[]` entries | Free-form debug channel, never for control logic | Currently unused |
+| `information[]` entries | Free-form debug channel, never for control logic | M8: `m8.slotState` (INFO). Never a command; the vehicle does not act on a slot mismatch |
 
 Adding top-level fields to any message, renaming fields, or deviating from the
 topic structure is **not** an extension — it is a contract break and requires
 an ADR.
 
-**Currently used extensions: project `errorType` names** (the one extension
-point in use, recorded 2026-08-25 — each is a free string per the spec and
-each is documented at its producer): `safetyStop` (drive enable down;
+**Currently used extensions: project `errorType` names** (recorded
+2026-08-25 — each is a free string per the spec and each is documented
+at its producer): `safetyStop` (drive enable down;
 `vda_messages.errors_and_safety`), `orderError` (an order or extension
 refused, spec-suggested name), `unsupportedAction` (actionType not
 implemented), `cancelUnconfirmed` (the empty goal went unanswered past its
-deadline; `vda_agent._pump_cancel`), `pathBlocked` (navigation gave up on a body; the escalation's end). The names are camelCase, matching the
+deadline; `vda_agent._pump_cancel`), `pathBlocked` (navigation gave up on a body; the escalation's end). **M8 adds** `m8.dockAbort` (`errors[]`,
+WARNING) and `m8.slotState` (`information[]`, INFO) — names locked in
+`m8/ARCHITECTURE.md` §5 and `m8/m8_core/vda_map.py`; see amendment
+2026-09-11. The names are camelCase, matching the
 spec's own suggested error names, and section 9's "PascalCase" rule is
-corrected by this sentence.
+corrected by this sentence. The `m8.` prefix keeps M8 types out of the
+VDA-predefined set.
 
 ## Amendment 2026-08-21 (M6.2)
 
@@ -464,6 +472,10 @@ other two are recomputed on every state and therefore persist exactly as long
 as the condition does — `safetyStop` for as long as the enable is down,
 `orderError` for the single state a refusal produces.
 
+M8's `m8.dockAbort` is not in this vehicle-agent table. It is a mapper
+fragment (`m8/m8_core/vda_map.py`), documented in amendment 2026-09-11,
+and is not yet published by `vda_agent`.
+
 ## Amendment 2026-08-25 (M6 review) — the base tables re-cut against the code
 
 The 2026-08-25 review measured this document against the code at the M6.7
@@ -492,3 +504,33 @@ changed, so a differ knows it was deliberate:
   (three instant + two node); `agvGeometry` sent empty.
 * Section 9: the "no extensions" claim replaced by the four project
   errorType names in use.
+
+## Amendment 2026-09-11 (M8) — `m8.dockAbort` and `m8.slotState`
+
+Additive, and the two base-table cells that would otherwise still say
+`information[]` is unused are edited in place (section 5 used-fields
+rows for `information[]`; section 5 omitted table drops that row;
+section 9's extension-policy cell and the "currently used extensions"
+paragraph). Architecture is not reopened: M8 → M7 remains VDA 5050
+`state` only; the F-PLC never receives M8 input (R4); `information[]`
+is still not a control channel.
+
+The names are the ones `m8/ARCHITECTURE.md` §5 and `m8/m8_core/vda_map.py`
+already use. They are documented here before any vehicle agent puts
+them on the wire (M8 Phase D). The mapper builds fragments; it does
+not publish MQTT.
+
+| Type | Array | Level | Means |
+|---|---|---|---|
+| `m8.dockAbort` | `errors[]` | WARNING | Dock-abort classifier (pallet absent, rotated, shifted, pocket blocked, stringer in fork path). Cycle ends at staging; the fleet may `cancelOrder`. Not a safety event: FATAL would mean "not in running condition", which M8 does not claim, and the F-PLC never hears this. |
+| `m8.slotState` | `information[]` | INFO | Shelf-slot table at station approach (empty / occupied / blocked) carried in `infoReferences` as `slot:<id>` → state. A mismatch is a fleet-level finding; the vehicle does not act. |
+
+Field names on each item are the spec's, not inventions:
+
+* `errors[]`: `errorType`, `errorLevel` (WARNING \| FATAL), `errorDescription`, `errorHint`, `errorReferences[{referenceKey, referenceValue}]`
+* `information[]`: `infoType`, `infoLevel` (INFO \| DEBUG), `infoDescription`, `infoReferences[{referenceKey, referenceValue}]`
+
+`errorLevel` for abort is WARNING, not FATAL. Project error names stay
+camelCase (amendment 2026-08-21 (e)); the dotted `m8.` prefix is the
+manufacturer extension namespace so these strings do not collide with
+`orderError` / `pathBlocked` and the rest of the VDA-predefined set.
