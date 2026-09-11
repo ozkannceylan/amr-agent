@@ -12,6 +12,11 @@ stored as `reason` and is never parsed here.
 RECEIVED is entered and left in the same propose() call. Duplicate
 idempotency keys return the existing proposal rather than opening a
 new one. There is no auto-approve in Phase 1.
+
+TTL is checked where the decision is applied, not only in the sweep.
+apply_decision is the path that ends in fleet/task/submit, so it may
+not trust that expire_due ran first: a proposal past its TTL expires
+there instead of being approved.
 """
 from __future__ import annotations
 
@@ -254,13 +259,16 @@ class Gate:
                             idempotency_key),
         )
 
+    def is_due(self, proposal: Proposal, now: float) -> bool:
+        """PENDING and at or past its TTL. The one TTL comparison."""
+        return (proposal.state == PENDING
+                and now - proposal.created_ts >= self.policy.proposal_ttl_s)
+
     def expire_due(self, now: float | None = None) -> list[Proposal]:
         when = self.now() if now is None else now
         expired = []
         for proposal in list(self._by_id.values()):
-            if proposal.state != PENDING:
-                continue
-            if when - proposal.created_ts < self.policy.proposal_ttl_s:
+            if not self.is_due(proposal, when):
                 continue
             self._close(
                 proposal, EXPIRED, when,
@@ -300,6 +308,21 @@ class Gate:
         if proposal is None or proposal.state != PENDING:
             raise ValueError(
                 "proposal {!r} is not PENDING".format(proposal_id))
+        if self.is_due(proposal, when):
+            # Expire before decide. The decision arrived too late, so
+            # the TTL edge fires here and nothing is forwarded. The row
+            # names who tried; the proposal keeps decided_by empty
+            # because no decision was applied.
+            return self._close(
+                proposal, EXPIRED, when,
+                tool="decision",
+                arguments={
+                    "proposal_id": proposal_id,
+                    "decision": decision,
+                    "decided_by": decided_by,
+                },
+                decided_by=decided_by,
+            )
         if decision == "approve":
             target = APPROVED
         elif decision == "reject":

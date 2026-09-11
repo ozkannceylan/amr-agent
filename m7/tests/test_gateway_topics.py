@@ -14,7 +14,7 @@ import paho.mqtt.client as mqtt
 
 from gate.audit import AuditLog
 from gate.policy import load_policy
-from gate.proposal import FORWARDED, PENDING, Gate
+from gate.proposal import EXPIRED, FORWARDED, PENDING, Gate
 from gateway.server import (
     DECISION_TOPIC,
     PROPOSALS_TOPIC,
@@ -210,3 +210,25 @@ def test_read_tools_do_not_need_a_broker(tmp_path):
         gw.gate.policy.stations)
     missing = dispatch(gw, "get_proposal", {"proposal_id": "pr-none"})
     assert missing == {"found": False, "proposal": None}
+
+
+def test_g1_an_expiry_sweep_republishes_the_retained_proposal_set(tmp_path):
+    """A proposal the TTL has taken must leave the operator's screen;
+    the sweep and the republish are one action."""
+    gw = _gateway(tmp_path)
+    client = FakeClient()
+    gw.bind_mqtt(client)
+    gw.accept_status(json.dumps({"ts": gw.now(), "manager": "ONLINE"}))
+    first = gw.propose_transport("S1", "S4", "move", "k-ttl")
+    assert first["verdict"] == PENDING
+    client.pubs.clear()
+
+    gw._clock_state["t"] = gw.now() + gw.gate.policy.proposal_ttl_s
+    gw.get_proposal(first["proposal_id"])
+
+    assert gw.gate.get(first["proposal_id"]).state == EXPIRED
+    retained = [item for item in client.pubs
+                if item["topic"] == PROPOSALS_TOPIC and item["retain"]]
+    assert retained, "an expiry sweep must refresh the retained document"
+    assert json.loads(retained[-1]["payload"])["proposals"] == []
+    assert set(item["topic"] for item in client.pubs) <= set(PUBLISH_TOPICS)

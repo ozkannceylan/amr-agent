@@ -33,6 +33,7 @@ from gate.audit import AuditLog                          # noqa: E402
 from gate.policy import load_policy                      # noqa: E402
 from gate.proposal import (                              # noqa: E402
     APPROVED,
+    EXPIRED,
     PENDING,
     Gate,
     load_schema,
@@ -121,7 +122,7 @@ class Gateway:
 
     def propose_transport(self, from_station, to_station, reason,
                           idempotency_key) -> dict:
-        self.gate.expire_due(self.now())
+        expired = self.gate.expire_due(self.now())
         result = self.gate.propose(
             from_station=from_station,
             to_station=to_station,
@@ -131,12 +132,15 @@ class Gateway:
             status_ts=self.status_ts(),
             now=self.now(),
         )
-        if result.proposal is not None and result.verdict == PENDING:
+        added = result.proposal is not None and result.verdict == PENDING
+        if expired or added:
+            # One publish, after both edges, so the retained document is
+            # the pending set as it stands and not as it was mid-call.
             self._publish_proposals()
         return _proposal_payload(result)
 
     def get_proposal(self, proposal_id) -> dict:
-        self.gate.expire_due(self.now())
+        self._sweep()
         if not proposal_id:
             return {"found": False, "proposal": None}
         proposal = self.gate.get(str(proposal_id))
@@ -150,6 +154,9 @@ class Gateway:
         errors = list(Draft202012Validator(self._decision_schema).iter_errors(body))
         if errors:
             return {"applied": False, "verdict": "REJECTED_SCHEMA"}
+        # The decided proposal's own TTL is apply_decision's business
+        # (expire before decide); the sweep below is for the others, and
+        # runs after so it cannot race the decision for the same id.
         result = self.gate.apply_decision(
             body["proposal_id"],
             body["decision"],
@@ -157,13 +164,16 @@ class Gateway:
             now=self.now(),
         )
         if result.ignored:
+            self._sweep()
             return {"applied": False, "verdict": result.verdict}
         if result.verdict == APPROVED:
             self._forward(result.proposal)
+        self.gate.expire_due(self.now())
         self._publish_proposals()
         verdict = (result.proposal.state
                    if result.proposal is not None else result.verdict)
-        return {"applied": True, "verdict": verdict,
+        # An expired proposal is a decision that did not land.
+        return {"applied": verdict != EXPIRED, "verdict": verdict,
                 "proposal": result.proposal.to_record()
                 if result.proposal is not None else None}
 
@@ -243,6 +253,18 @@ class Gateway:
             forward_rc=rc if rc is not None else "no_ack",
             now=self.now())
 
+    def _sweep(self) -> list:
+        """Expire what is due and keep the retained document honest.
+
+        An expired proposal left on the operator's screen is one an
+        operator can still try to approve, so the sweep and the
+        republish are one action.
+        """
+        expired = self.gate.expire_due(self.now())
+        if expired:
+            self._publish_proposals()
+        return expired
+
     def _publish_proposals(self) -> None:
         self._publish(PROPOSALS_TOPIC, self.proposals_document(), retain=True)
 
@@ -269,6 +291,7 @@ class Gateway:
         self.connected = True
         for topic in SUBSCRIBE_TOPICS:
             client.subscribe(topic, qos=QOS)
+        self.gate.expire_due(self.now())
         self._publish_proposals()
 
     def _on_message(self, client, userdata, msg):

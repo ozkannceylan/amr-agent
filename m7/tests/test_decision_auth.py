@@ -17,13 +17,19 @@ from gate.audit import AuditLog
 from gate.policy import load_policy
 from gate.proposal import (
     APPROVED,
+    EXPIRED,
     IGNORED_UNAUTHORISED,
     PENDING,
     REJECTED_HUMAN,
     Gate,
     load_schema,
 )
-from gateway.server import DECISION_TOPIC, SUBMIT_TOPIC, Gateway
+from gateway.server import (
+    DECISION_TOPIC,
+    PROPOSALS_TOPIC,
+    SUBMIT_TOPIC,
+    Gateway,
+)
 
 
 class FakeInfo:
@@ -68,6 +74,7 @@ def _gateway(tmp_path, now=1000.0):
         clock=now_fn,
     )
     gw = Gateway(gate, client_id="console-a", clock=now_fn)
+    gw._clock_state = clock
     gw.accept_status(json.dumps({"ts": now, "manager": "ONLINE"}))
     return gw
 
@@ -276,3 +283,29 @@ def test_phase_2b_fleet_cli_approve_help(monkeypatch):
     assert exited.value.code == 0
     text = sys.stdout.getvalue()
     assert "list | approve ID | reject ID" in text
+
+
+def test_g3_late_decision_forwards_nothing_and_clears_screen(tmp_path):
+    """A stale approval must not reach fleet/task/submit, and the
+    retained document must stop offering the proposal it just expired."""
+    gw = _gateway(tmp_path)
+    client = FakeClient()
+    gw.bind_mqtt(client)
+    pending = _pending(gw)
+    pid = pending["proposal_id"]
+    gw._clock_state["t"] = (
+        gw.gate.get(pid).created_ts + gw.gate.policy.proposal_ttl_s)
+    # Fresh status, so a forward would have succeeded had the TTL not fired.
+    gw.accept_status(json.dumps({"ts": gw.now(), "manager": "ONLINE"}))
+
+    handled = gw.handle_decision(approve.build_decision(
+        pid, "approve", ts=gw.now()))
+
+    assert handled["applied"] is False
+    assert handled["verdict"] == EXPIRED
+    assert gw.gate.get(pid).state == EXPIRED
+    assert not any(item["topic"] == SUBMIT_TOPIC for item in client.pubs)
+    retained = [item for item in client.pubs
+                if item["topic"] == PROPOSALS_TOPIC and item["retain"]]
+    assert retained, "the expiry must refresh the retained document"
+    assert json.loads(retained[-1]["payload"])["proposals"] == []

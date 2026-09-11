@@ -1,9 +1,12 @@
 """G2 — every proposal is gated and audited.
 
-A bad schema, a bad station, a stale status, and a duplicate key each
-produce the named verdict, and every transition has an audit row.
+A bad schema, a bad station, a stale status, a duplicate key, and a
+decision that arrives after the TTL each produce the named verdict, and
+every transition has an audit row.
 Architecture hygiene, not a safety function: M7 is not one.
 """
+import pytest
+
 from gate.audit import AuditLog
 from gate.policy import (
     RULE_STALE_STATUS,
@@ -126,3 +129,82 @@ def test_g2_every_transition_has_an_audit_row(tmp_path):
     assert schema.proposal.proposal_id == by_verdict[REJECTED_SCHEMA][0]["proposal_id"]
     assert policy.proposal.proposal_id == by_verdict[REJECTED_POLICY][0]["proposal_id"]
     assert other.proposal.state == EXPIRED
+
+
+def test_g2_decision_after_ttl_expires_instead_of_deciding(tmp_path):
+    """The decision path is the one that moves a vehicle, so it checks
+    the TTL itself rather than trusting a sweep to have run first."""
+    gate = _gate(tmp_path)
+    pending = _propose(gate, "ttl-approve")
+    pid = pending.proposal.proposal_id
+    gate._clock_state["t"] = (
+        pending.proposal.created_ts + gate.policy.proposal_ttl_s)
+
+    result = gate.apply_decision(pid, "approve", "m7-approve")
+
+    assert result.verdict == EXPIRED
+    assert gate.get(pid).state == EXPIRED
+    assert gate.get(pid).history[-1] == "PENDING->EXPIRED"
+    assert gate.get(pid).decided_by is None
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_g2_expired_decision_is_audited_with_who_tried(tmp_path, decision):
+    gate = _gate(tmp_path)
+    pending = _propose(gate, "ttl-audit-" + decision)
+    pid = pending.proposal.proposal_id
+    gate._clock_state["t"] = (
+        pending.proposal.created_ts + gate.policy.proposal_ttl_s + 1.0)
+
+    gate.apply_decision(pid, decision, "m7-approve")
+
+    rows = [row for row in gate.audit.rows() if row["proposal_id"] == pid]
+    assert [row["verdict"] for row in rows] == [PENDING, EXPIRED]
+    expired_row = rows[-1]
+    assert expired_row["tool"] == "decision"
+    assert expired_row["decided_by"] == "m7-approve"
+    assert expired_row["arguments"]["decision"] == decision
+
+
+def test_g2_decision_just_inside_the_ttl_still_applies(tmp_path):
+    gate = _gate(tmp_path)
+    pending = _propose(gate, "ttl-edge")
+    pid = pending.proposal.proposal_id
+    gate._clock_state["t"] = (
+        pending.proposal.created_ts + gate.policy.proposal_ttl_s - 0.001)
+
+    result = gate.apply_decision(pid, "approve", "m7-approve")
+
+    assert result.verdict == APPROVED
+    assert gate.get(pid).decided_by == "m7-approve"
+
+
+def test_g2_an_expired_proposal_cannot_be_decided_twice(tmp_path):
+    gate = _gate(tmp_path)
+    pending = _propose(gate, "ttl-twice")
+    pid = pending.proposal.proposal_id
+    gate._clock_state["t"] = (
+        pending.proposal.created_ts + gate.policy.proposal_ttl_s)
+    gate.apply_decision(pid, "approve", "m7-approve")
+    before = len(gate.audit.rows())
+
+    with pytest.raises(ValueError, match="not PENDING"):
+        gate.apply_decision(pid, "approve", "m7-approve")
+
+    assert len(gate.audit.rows()) == before
+
+
+def test_g2_expiry_before_decide_runs_after_the_authorisation_check(tmp_path):
+    """An unauthorised decider is still ignored, and still moves nothing:
+    it does not get to trip the expiry edge either."""
+    gate = _gate(tmp_path)
+    pending = _propose(gate, "ttl-forged")
+    pid = pending.proposal.proposal_id
+    gate._clock_state["t"] = (
+        pending.proposal.created_ts + gate.policy.proposal_ttl_s)
+
+    result = gate.apply_decision(pid, "approve", "intruder")
+
+    assert result.ignored is True
+    assert gate.get(pid).state == PENDING
+    assert gate.audit.rows()[-1]["verdict"] == "IGNORED_UNAUTHORISED"
