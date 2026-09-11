@@ -73,6 +73,10 @@ DOMINANT_TRIM_PASSES = 3
 DOMINANT_TRIM_M = 0.05
 OBJECT_CLEARANCE_M = 0.06      # nearer than the dominant plane => stands on it
 MIN_BLOB_CELLS = 6
+# How many standing objects to try before giving up. A warehouse aisle
+# puts walls, racking and the truck's own forks above the floor beside
+# the pallet, and the pallet is not the biggest of them.
+MAX_BLOB_CANDIDATES = 8
 MIN_PLANE_POINTS = 12
 MIN_FACE_POINTS = 40
 
@@ -418,16 +422,23 @@ def range_window(expected_range: Optional[float] = None
             min(hi, float(expected_range) + TAG_WINDOW_M))
 
 
-def _blob_bbox(frame: DepthFrame, floor: Plane, stride: int,
-               fwd: Tuple[float, float, float],
-               window: Tuple[float, float],
-               seed_px: Optional[Tuple[float, float]] = None
-               ) -> Optional[Tuple[int, int, int, int]]:
-    """Bounding box of the thing standing above the floor, in the window.
+def _blob_candidates(frame: DepthFrame, floor: Plane, stride: int,
+                     fwd: Tuple[float, float, float],
+                     window: Tuple[float, float],
+                     seed_px: Optional[Tuple[float, float]] = None
+                     ) -> List[Tuple[int, int, int, int]]:
+    """Bounding boxes of things standing above the floor, in the window.
+
+    ALL of them, best first - not just the biggest. A pallet at staging
+    is 2.9 % of the frame and a warehouse wall behind it is not; taking
+    only the largest component picked the wall on the plant, which then
+    failed the pallet-size gate and the frame was refused with a pallet
+    in plain view. The gates below decide which candidate is a pallet;
+    this function's job is not to decide it early.
 
     `seed_px` is where a live tag says the target is. It is applied LAST
-    and only to choose between components - it never widens the window
-    and never rescues a frame that had no component to choose from.
+    and only to ORDER the candidates - it never widens the window and
+    never rescues a frame that had no candidate to choose from.
     """
     lo, hi = window
     cells: Dict[Tuple[int, int], Tuple[int, int]] = {}
@@ -447,7 +458,7 @@ def _blob_bbox(frame: DepthFrame, floor: Plane, stride: int,
             if pz - z > OBJECT_CLEARANCE_M:
                 cells[(u // stride, v // stride)] = (u, v)
     if len(cells) < MIN_BLOB_CELLS:
-        return None
+        return []
     seen = set()
     comps: List[List[Tuple[int, int]]] = []
     for start in cells:
@@ -466,28 +477,42 @@ def _blob_bbox(frame: DepthFrame, floor: Plane, stride: int,
         comps.append(comp)
     comps = [c for c in comps if len(c) >= MIN_BLOB_CELLS]
     if not comps:
-        return None
-    best = max(comps, key=len)
+        return []
+    comps.sort(key=len, reverse=True)
     if seed_px is not None:
         key = (int(seed_px[0]) // stride, int(seed_px[1]) // stride)
-        holding = [c for c in comps if key in c]
-        if holding:
-            best = max(holding, key=len)
-        else:
-            def gap(comp):
-                us_ = [cells[c][0] for c in comp]
-                vs_ = [cells[c][1] for c in comp]
-                return math.hypot(sum(us_) / len(us_) - seed_px[0],
-                                  sum(vs_) / len(vs_) - seed_px[1])
-            best = min(comps, key=gap)
-    us = [cells[c][0] for c in best]
-    vs = [cells[c][1] for c in best]
-    # One stride of slack each way: the coarse grid clips the edges.
-    u0 = max(0, min(us) - stride)
-    u1 = min(frame.width, max(us) + 2 * stride)
-    v0 = max(0, min(vs) - stride)
-    v1 = min(frame.height, max(vs) + 2 * stride)
-    return u0, u1, v0, v1
+
+        def rank(comp):
+            if key in comp:
+                return (0, -len(comp))
+            us_ = [cells[c][0] for c in comp]
+            vs_ = [cells[c][1] for c in comp]
+            return (1, math.hypot(sum(us_) / len(us_) - seed_px[0],
+                                  sum(vs_) / len(vs_) - seed_px[1]))
+
+        comps.sort(key=rank)
+    boxes = []
+    for comp in comps[:MAX_BLOB_CANDIDATES]:
+        us = [cells[c][0] for c in comp]
+        vs = [cells[c][1] for c in comp]
+        # One stride of slack each way: the coarse grid clips the edges.
+        boxes.append((max(0, min(us) - stride),
+                      min(frame.width, max(us) + 2 * stride),
+                      max(0, min(vs) - stride),
+                      min(frame.height, max(vs) + 2 * stride)))
+    return boxes
+
+
+def _refuse(trace: Optional[Dict[str, object]], why: str) -> None:
+    """Name the gate that stopped this frame, then return None.
+
+    Every refusal in this module goes through here. The plant benches
+    log the name, because "no pose" and "no pose BECAUSE the face was
+    4 % of what was fitted" are not the same finding.
+    """
+    if trace is not None and "refused" not in trace:
+        trace["refused"] = why
+    return None
 
 
 def _horizontal_forward(up: Tuple[float, float, float]
@@ -519,7 +544,8 @@ def _perp_residual(plane: Plane, x: float, y: float, z: float,
 def _fit_face(frame: DepthFrame, floor: Optional[Plane],
               bbox: Tuple[int, int, int, int], stride: int,
               up: Tuple[float, float, float],
-              window: Tuple[float, float]
+              window: Tuple[float, float],
+              trace: Optional[Dict[str, object]] = None
               ) -> Optional[Tuple[Plane, int, Tuple[int, int, int, int],
                                   Optional[float], float]]:
     """Fit the pallet face inside bbox and return its own pixel box.
@@ -564,8 +590,10 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
                     continue
                 height = -r
             raw.append((x, y, z, u, v, d_h, height))
+    if trace is not None:
+        trace["in_window"] = len(raw)
     if len(raw) < MIN_FACE_POINTS:
-        return None
+        return _refuse(trace, "too_few_points_in_window")
     height_cut = None
     if floor is not None:
         heights = sorted(p[6] for p in raw)
@@ -575,6 +603,9 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
             raw = under
             height_cut = top
     candidates = len(raw)
+    if trace is not None:
+        trace["after_deck_cut"] = candidates
+        trace["height_cut"] = height_cut
     counts: Dict[int, int] = {}
     for p in raw:
         key = int(math.floor(p[5] / FACE_SEED_BIN_M))
@@ -586,9 +617,12 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
     # TRUST one. The seed is one mode-wide slice of a face that a yaw
     # spreads across several slices, so it is held to the solver's own
     # minimum; MIN_FACE_POINTS is the gate on the final inlier set.
+    if trace is not None:
+        trace["seed_range_m"] = near
+        trace["seed_points"] = len(seed)
     plane = _fit_plane([(p[0], p[1], p[2]) for p in seed], MIN_PLANE_POINTS)
     if plane is None:
-        return None
+        return _refuse(trace, "seed_plane_unsolvable")
     inliers = seed
     for _ in range(FACE_TRIM_PASSES):
         norm = math.sqrt(plane.alpha ** 2 + plane.beta ** 2 + plane.gamma ** 2)
@@ -602,11 +636,14 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
             break
         plane = refit
         inliers = kept
-    if len(inliers) < MIN_FACE_POINTS:
-        return None
     frac = len(inliers) / float(candidates)
+    if trace is not None:
+        trace["face_inliers"] = len(inliers)
+        trace["inlier_frac"] = frac
+    if len(inliers) < MIN_FACE_POINTS:
+        return _refuse(trace, "too_few_face_inliers")
     if frac < FACE_INLIER_FRAC_MIN:
-        return None
+        return _refuse(trace, "face_is_too_small_a_share")
     us = [p[3] for p in inliers]
     vs = [p[4] for p in inliers]
     box = (min(us), max(us) + 1, min(vs), max(vs) + 1)
@@ -658,7 +695,9 @@ def face_yaw(face: Plane, up: Tuple[float, float, float]) -> float:
 def segment(frame: DepthFrame,
             expected_range: Optional[float] = None,
             tag_u: Optional[float] = None,
-            tag_v: Optional[float] = None) -> Optional[FaceSegment]:
+            tag_v: Optional[float] = None,
+            trace: Optional[Dict[str, object]] = None
+            ) -> Optional[FaceSegment]:
     """Derive the pallet-face ROI for this frame, or refuse.
 
     ORDER MATTERS and it is the order of the brief. The range window
@@ -677,28 +716,61 @@ def segment(frame: DepthFrame,
     pipeline with none of these.
     """
     if frame.width <= 0 or frame.height <= 0:
-        return None
+        return _refuse(trace, "empty_frame")
     coarse, fine = _strides(frame)
     window = range_window(expected_range)
+    if trace is not None:
+        trace["window_m"] = window
+        trace["valid_px"] = frame.valid_count()
     floor = dominant_plane(frame)
     if floor is None:
-        return None
+        return _refuse(trace, "no_dominant_plane")
+    if trace is not None:
+        trace["floor_dz_dy"] = floor.dz_dy(0.0, 0.0)
+        trace["floor_depth_on_axis_m"] = floor.depth_at(0.0, 0.0)
+        trace["floor_points"] = floor.n
     seed_px = None
     if tag_u is not None and tag_v is not None:
         seed_px = (float(tag_u), float(tag_v))
     up = _world_up(floor)
-    bbox = _blob_bbox(frame, floor, coarse, _horizontal_forward(up), window,
-                      seed_px)
-    if bbox is None:
+    boxes = _blob_candidates(frame, floor, coarse, _horizontal_forward(up),
+                             window, seed_px)
+    if trace is not None:
+        trace["candidates"] = len(boxes)
+        trace["tag_seeded"] = seed_px is not None
+    attempts: List[Tuple[Optional[Plane], Tuple[int, int, int, int]]] = [
+        (floor, b) for b in boxes]
+    if not attempts:
         # Nothing stands above the dominant plane inside the window: the
         # dominant plane is the only surface in view, so it is the
         # candidate face and the ROI is the frame. `up` is then unknown -
         # see _world_up - and the sign test on b below is what rejects a
         # floor that reached here.
-        floor = None
-        up = _world_up(None)
-        bbox = (0, frame.width, 0, frame.height)
-    fitted = _fit_face(frame, floor, bbox, fine, up, window)
+        attempts = [(None, (0, frame.width, 0, frame.height))]
+    last: Dict[str, object] = {}
+    for index, (floor_for_fit, bbox) in enumerate(attempts):
+        step: Dict[str, object] = {}
+        seg = _try_candidate(frame, floor_for_fit, bbox, fine, window, step)
+        if seg is not None:
+            if trace is not None:
+                trace.update(step)
+                trace["candidate_used"] = index
+            return seg
+        last = step
+    if trace is not None:
+        trace.update(last)
+        trace["candidate_used"] = None
+    return None
+
+
+def _try_candidate(frame: DepthFrame, floor: Optional[Plane],
+                   bbox: Tuple[int, int, int, int], fine: int,
+                   window: Tuple[float, float],
+                   trace: Dict[str, object]) -> Optional[FaceSegment]:
+    """Fit one standing object and put it through every gate."""
+    trace["blob"] = bbox
+    up = _world_up(floor)
+    fitted = _fit_face(frame, floor, bbox, fine, up, window, trace)
     if fitted is None:
         return None
     face, n_inliers, box, height_cut, frac = fitted
@@ -706,20 +778,25 @@ def segment(frame: DepthFrame,
     x_c, y_c = frame.x_of(0.5 * (u0 + u1)), frame.y_of(0.5 * (v0 + v1))
     z_c = face.depth_at(x_c, y_c)
     if z_c is None or z_c <= 0.0:
-        return None
+        return _refuse(trace, "face_plane_behind_the_camera")
     # The sign test on b. `b` is dz/dy: on a floor the depth FALLS as the
     # image goes down (-3.8 on this rig), on a face standing on that
     # floor it rises (+0.7...+1.5). The tolerance below zero is for a
     # level camera, where a face reads exactly 0.
     dz_dy = face.dz_dy(x_c, y_c)
-    if dz_dy is None or dz_dy < FACE_MIN_DZ_DY:
-        return None
     width_m = (u1 - u0) / frame.fx * z_c
     height_m = (v1 - v0) / frame.fy * z_c
+    trace["face_box"] = box
+    trace["face_z_m"] = z_c
+    trace["face_dz_dy"] = dz_dy
+    trace["face_width_m"] = width_m
+    trace["face_height_m"] = height_m
+    if dz_dy is None or dz_dy < FACE_MIN_DZ_DY:
+        return _refuse(trace, "candidate_falls_away_like_a_floor")
     if not (PALLET_FACE_WIDTH_M[0] <= width_m <= PALLET_FACE_WIDTH_M[1]):
-        return None
+        return _refuse(trace, "face_width_not_pallet_sized")
     if not (PALLET_FACE_HEIGHT_M[0] <= height_m <= PALLET_FACE_HEIGHT_M[1]):
-        return None
+        return _refuse(trace, "face_height_not_pallet_sized")
     return FaceSegment(face=face, floor=floor, u0=u0, u1=u1, v0=v0, v1=v1,
                        inliers=n_inliers, width_m=width_m,
                        height_m=height_m, up=up, blob=bbox,
@@ -738,7 +815,8 @@ def _runs(cols: Sequence[int], max_gap: int = 1) -> List[List[int]]:
     return runs
 
 
-def find_pocket_pair(frame: DepthFrame, seg: FaceSegment
+def find_pocket_pair(frame: DepthFrame, seg: FaceSegment,
+                     trace: Optional[Dict[str, object]] = None
                      ) -> Optional[Tuple[float, float, float]]:
     """Two pocket-wide columns of depth behind the face, 0.56 m apart.
 
@@ -759,8 +837,11 @@ def find_pocket_pair(frame: DepthFrame, seg: FaceSegment
         if med > fz + POCKET_MIN_DEPTH_M:
             deeper.append(u)
     runs = [r for r in _runs(deeper) if len(r) >= MIN_POCKET_COLS]
+    if trace is not None:
+        trace["deeper_cols"] = len(deeper)
+        trace["pocket_runs"] = len(runs)
     if len(runs) < 2:
-        return None
+        return _refuse(trace, "fewer_than_two_pocket_runs")
     runs.sort(key=len, reverse=True)
     pair = sorted(runs[:2], key=lambda r: r[0])
     left, right = pair
@@ -771,12 +852,14 @@ def find_pocket_pair(frame: DepthFrame, seg: FaceSegment
     if z_ref is None or z_ref <= 0.0:
         return None
     span_m = (u_right - u_left) / frame.fx * z_ref
+    if trace is not None:
+        trace["pocket_span_m"] = span_m
     if not (POCKET_SPAN_M[0] <= span_m <= POCKET_SPAN_M[1]):
-        return None
+        return _refuse(trace, "pocket_span_wrong")
     for run in pair:
         w_m = len(run) / frame.fx * z_ref
         if not (POCKET_WIDTH_M[0] <= w_m <= POCKET_WIDTH_M[1]):
-            return None
+            return _refuse(trace, "pocket_width_wrong")
     vs = []
     for run in pair:
         for u in run:
@@ -887,7 +970,9 @@ def fit_face_plane(frame: DepthFrame,
 def observe(frame: DepthFrame,
             expected_range: Optional[float] = None,
             tag_u: Optional[float] = None,
-            tag_v: Optional[float] = None) -> Optional[PocketObservation]:
+            tag_v: Optional[float] = None,
+            trace: Optional[Dict[str, object]] = None
+            ) -> Optional[PocketObservation]:
     """The pocket-pair point, or None.
 
     `expected_range`, `tag_u` and `tag_v` are the live tag's reading if
@@ -895,10 +980,10 @@ def observe(frame: DepthFrame,
     ever narrowing: tagless docking runs on the range window alone.
     """
     seg = segment(frame, expected_range=expected_range,
-                  tag_u=tag_u, tag_v=tag_v)
+                  tag_u=tag_u, tag_v=tag_v, trace=trace)
     if seg is None:
         return None
-    pair = find_pocket_pair(frame, seg)
+    pair = find_pocket_pair(frame, seg, trace)
     if pair is None:
         return None
     u_mid, v_mid, span_m = pair
