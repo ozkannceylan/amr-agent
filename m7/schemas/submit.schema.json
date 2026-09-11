@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://amr-agent.local/m7/schemas/submit.schema.json",
+  "title": "fleet/task/submit body",
+  "description": "The payload fleet_cli.build_submission produces and the fleet manager reads. Station allowlist and from!=to are policy, not this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taskId", "from", "to"],
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "from": {
+      "type": "string",
+      "minLength": 1
+    },
+    "to": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

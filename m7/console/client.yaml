@@ -1,0 +1,12 @@
+# Console client config. Model id and endpoint are data, not code.
+# Tests never load the live API: they use ScriptedModel.
+# ANTHROPIC_API_KEY is read from the environment, never from this file.
+
+model_id: claude-sonnet-4-20250514
+base_url: https://api.anthropic.com
+
+# Per-session budget (PLAN.md Phase 3 risk). A live run stops when
+# either cap is hit; the scripted client in tests never spends a call.
+max_api_calls: 8
+max_turns: 8
+max_tokens: 1024

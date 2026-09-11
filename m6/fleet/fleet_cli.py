@@ -5,6 +5,16 @@ Two commands and no state of its own:
   python3 fleet/fleet_cli.py submit S1 S4 [--task-id ...]
   python3 fleet/fleet_cli.py status [--watch]
 
+AND M7 APPROVE, REGISTERED HERE (Phase 2b). One subcommand; the
+body stays in m7/console/approve.py. An operator types
+
+  python3 fleet/fleet_cli.py approve list
+  python3 fleet/fleet_cli.py approve approve <id>
+  python3 fleet/fleet_cli.py approve reject <id>
+
+the same way they type submit and status. This file does not grow a
+second master and it does not publish fleet/task/submit for those.
+
 AND IT READS THE FLOOR TOO (M6.4). The status document carries a
 `traffic` block - who holds which piece of floor, who is waiting on
 whom, who yielded and how much of each task is base rather than horizon
@@ -618,10 +628,27 @@ def cmd_demo(args):
     return 0
 
 
+def _run_m7_approve(args):
+    """Phase 2b: one import. Implementation stays in m7/console/approve.py.
+
+    Deferred so `import fleet_cli` in m6 tests does not need the m7
+    tree. Host and port are this parser's, forwarded so
+    `fleet_cli --host H approve list` reaches the same broker as submit.
+    """
+    m7 = os.path.normpath(os.path.join(_HERE, os.pardir, os.pardir, "m7"))
+    if m7 not in sys.path:
+        sys.path.insert(0, m7)
+    from console import approve                      # noqa: E402
+    forwarded = ["--host", args.host, "--port", str(args.port)]
+    forwarded.extend(args.m7_argv)
+    return approve.main(forwarded)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="the fleet's operator console - submit transports, "
-                    "read the fleet's own account of itself")
+                    "read the fleet's own account of itself, approve M7 "
+                    "proposals")
     parser.add_argument("--host", default=MQTT_HOST)
     # The same env var the trucks, the manager and send_order read.
     parser.add_argument("--port", type=int, default=MQTT_PORT)
@@ -653,6 +680,16 @@ def main(argv=None):
                       help="pairs to print under --dry-run (default 25)")
     demo.add_argument("--dry-run", action="store_true",
                       help="print the plan and exit; needs no broker")
+    # Phase 2b: one add_parser. Nested list|approve|reject stay on
+    # approve.build_parser; remainder is forwarded with host/port.
+    approve_cmd = commands.add_parser(
+        "approve",
+        help="list / approve / reject an M7 transport proposal",
+        description="list pending M7 proposals, or approve/reject one "
+                    "(implemented in m7/console/approve.py)")
+    approve_cmd.add_argument(
+        "m7_argv", nargs=argparse.REMAINDER,
+        help="list | approve ID | reject ID")
     args = parser.parse_args(argv)
     # required=True on add_subparsers is 3.7+, but its error message is
     # 'invalid choice' rather than a usage; the explicit check prints the
@@ -664,6 +701,8 @@ def main(argv=None):
         return cmd_submit(args)
     if args.command == "demo":
         return cmd_demo(args)
+    if args.command == "approve":
+        return _run_m7_approve(args)
     return cmd_status(args)
 
 

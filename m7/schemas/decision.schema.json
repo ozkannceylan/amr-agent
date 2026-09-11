@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://amr-agent.local/m7/schemas/decision.schema.json",
+  "title": "fleet/proposal/decision body",
+  "description": "QoS 1, not retained. Published only by the approve subcommand. A decided_by the policy does not authorise is ignored and audited as IGNORED_UNAUTHORISED (G3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["proposal_id", "decision", "decided_by", "ts"],
+  "properties": {
+    "proposal_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["approve", "reject"]
+    },
+    "decided_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts": {
+      "type": "number"
+    }
+  }
+}

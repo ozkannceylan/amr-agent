@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://amr-agent.local/m7/schemas/audit.schema.json",
+  "title": "M7 audit row",
+  "description": "One JSONL line per state transition (ARCHITECTURE.md §5). Append-only; never rewritten.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ts",
+    "proposal_id",
+    "client_id",
+    "tool",
+    "arguments",
+    "schema_version",
+    "verdict"
+  ],
+  "properties": {
+    "ts": {
+      "type": "number"
+    },
+    "proposal_id": {
+      "type": "string"
+    },
+    "client_id": {
+      "type": "string"
+    },
+    "tool": {
+      "type": "string"
+    },
+    "arguments": {
+      "type": "object"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "verdict": {
+      "type": "string"
+    },
+    "policy_rule": {
+      "type": ["string", "null"]
+    },
+    "decided_by": {
+      "type": ["string", "null"]
+    },
+    "task_id": {
+      "type": ["string", "null"]
+    },
+    "forward_rc": {
+      "type": ["string", "integer", "null"]
+    }
+  }
+}

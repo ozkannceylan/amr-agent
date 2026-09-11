@@ -86,7 +86,7 @@ stateDiagram-v2
   RECEIVED --> REJECTED_SCHEMA: body fails the submit schema
   RECEIVED --> REJECTED_POLICY: policy says no
   RECEIVED --> PENDING: schema + policy pass
-  PENDING --> EXPIRED: TTL elapsed, nobody decided
+  PENDING --> EXPIRED: TTL elapsed, or a decision arrived after it
   PENDING --> REJECTED_HUMAN: fleet_cli reject
   PENDING --> APPROVED: fleet_cli approve
   APPROVED --> FORWARDED: fleet/task/submit acknowledged by broker
@@ -101,6 +101,12 @@ its staleness bound (the manager's own promise: republish at least every
 2 s). Nothing in the policy reads a vehicle. Auto-approve does not exist
 in Phase 1; whether any class ever auto-approves is an owner ruling for a
 later phase with the audit log as evidence.
+
+The TTL is checked where the decision is applied, not only by the
+sweep: `apply_decision` is the path that ends in `fleet/task/submit`,
+so a proposal past its TTL expires there rather than being approved,
+and the gateway republishes the retained `fleet/proposals` document
+whenever an expiry takes a proposal off the operator's screen.
 
 The gate is deterministic: same input, same verdict, and the verdict
 never depends on model output. The model's text is stored as `reason`
