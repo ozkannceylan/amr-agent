@@ -685,8 +685,11 @@ def main(argv=None):
     approve_cmd = commands.add_parser(
         "approve",
         help="list / approve / reject an M7 transport proposal",
-        add_help=False)
-    approve_cmd.add_argument("m7_argv", nargs=argparse.REMAINDER)
+        description="list pending M7 proposals, or approve/reject one "
+                    "(implemented in m7/console/approve.py)")
+    approve_cmd.add_argument(
+        "m7_argv", nargs=argparse.REMAINDER,
+        help="list | approve ID | reject ID")
     args = parser.parse_args(argv)
     # required=True on add_subparsers is 3.7+, but its error message is
     # 'invalid choice' rather than a usage; the explicit check prints the

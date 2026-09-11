@@ -267,3 +267,12 @@ def test_phase_2b_fleet_cli_registers_approve(monkeypatch):
     list_rc = approve.fleet_cli.main(["approve", "list"])
     assert list_rc == 0
     assert seen["argv"][-1] == "list"
+
+
+def test_phase_2b_fleet_cli_approve_help(monkeypatch):
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    with pytest.raises(SystemExit) as exited:
+        approve.fleet_cli.main(["approve", "--help"])
+    assert exited.value.code == 0
+    text = sys.stdout.getvalue()
+    assert "list | approve ID | reject ID" in text
