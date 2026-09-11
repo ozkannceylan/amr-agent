@@ -4,6 +4,8 @@ Status: **RUN 2026-09-11** on the m5-ver3 plant, this rig. Session
 `m8/bench/results/e1-20260911-125543/` (every number below is in its
 `frames.csv` / `summary.json`; nothing here is typed from memory).
 
+SUPERSEDED AS A BASELINE, NOT AS A RESULT (added 2026-09-11): the C1/C2 rework this file asked for is measured offline in `EVIDENCE_M8_C1C2_FIX.md` on branch `m8/c1c2-plane-roi-fix`. The plant re-run of E1 is still NOT_RUN, so every number below stands as the last thing the rig said. Nothing here was edited and no result folder was overwritten.
+
 **Verdict: the A1 classical C1 baseline does not locate the pocket pair
 on the plant.** At the tag bar's own staging range and at 1.5 m it
 returns no pose at all (0 of 30 frames each); at 1.0 m it returns a

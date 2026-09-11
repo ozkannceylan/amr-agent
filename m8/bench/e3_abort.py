@@ -62,7 +62,8 @@ STATIC_FIELDS = (
     "pose", "condition", "k", "stamp", "reason", "abort", "exact",
     "cam_range_m", "tru_lat_m", "tru_range_m", "face_u0", "face_u1",
     "face_v0", "face_v1", "face_frac_plane_roi", "valid_frac",
-    "t_decode_s", "t_classify_s",
+    "roi_u0", "roi_u1", "roi_v0", "roi_v1", "seg_width_m",
+    "seg_height_m", "seg_yaw_rad", "t_decode_s", "t_classify_s",
 )
 CYCLE_FIELDS = (
     "cycle", "k", "stamp", "wall", "reason", "abort", "truth_x", "truth_y",
@@ -91,17 +92,32 @@ def _fmt(v, nd=4):
 
 
 def classify_frame(frame):
-    """(reason or None, valid_frac, t_decode, t_classify) via m8_core.abort."""
+    """(reason or None, valid_frac, t_decode, t_classify, seg) via m8_core.abort.
+
+    `seg` is the face ROI C2 derived for this frame, recomputed OUTSIDE
+    the timed call. E3's baseline could only record the fixed ROI it was
+    told about; a classifier that derives its own has to log it, or
+    "pallet_absent" cannot be told apart from "the pallet was there and
+    the segmentation missed it".
+    """
     from bench import plant as P
     from m8_core.abort import classify
+    from m8_core.pocket import face_yaw, segment
     t0 = time.perf_counter()
     depths = P.decode(frame)
     df = P.depth_frame(frame, depths)
     t1 = time.perf_counter()
     reason = classify(df)
     t2 = time.perf_counter()
+    seg = segment(df)
+    info = None
+    if seg is not None:
+        info = {"roi_u0": seg.u0, "roi_u1": seg.u1,
+                "roi_v0": seg.v0, "roi_v1": seg.v1,
+                "seg_width_m": seg.width_m, "seg_height_m": seg.height_m,
+                "seg_yaw_rad": face_yaw(seg.face, seg.up)}
     valid = sum(1 for z in depths if math.isfinite(z) and z > 0.0)
-    return reason, valid / float(len(depths)), t1 - t0, t2 - t1
+    return reason, valid / float(len(depths)), t1 - t0, t2 - t1, info
 
 
 def run_static(plant, cap, args, inject, P):
@@ -141,7 +157,7 @@ def run_static(plant, cap, args, inject, P):
             for k, frame in enumerate(frames):
                 if frame.get("info") is None:
                     frame["info"] = info
-                reason, valid_frac, t_dec, t_cls = classify_frame(frame)
+                reason, valid_frac, t_dec, t_cls, seg = classify_frame(frame)
                 row = {
                     "pose": label, "condition": condition, "k": k,
                     "stamp": frame["stamp"], "reason": reason or "none",
@@ -150,6 +166,8 @@ def run_static(plant, cap, args, inject, P):
                     "cam_range_m": cam_range, "valid_frac": valid_frac,
                     "t_decode_s": t_dec, "t_classify_s": t_cls,
                 }
+                if seg is not None:
+                    row.update(seg)
                 if truth is not None:
                     row["tru_lat_m"] = truth["pocket_opt"][0]
                     row["tru_range_m"] = truth["pocket_opt"][2]
@@ -207,7 +225,7 @@ def run_cycles(plant, cap, args, inject, P, dest):
         crow = []
 
         def on_frame(frame, _c=c, _rows=crow):
-            reason, valid_frac, _t_dec, t_cls = classify_frame(frame)
+            reason, valid_frac, _t_dec, t_cls, _seg = classify_frame(frame)
             tr = frame.get("truth")
             row = {"cycle": _c, "k": len(_rows), "stamp": frame["stamp"],
                    "wall": frame["wall"] - t_start, "reason": reason or "none",

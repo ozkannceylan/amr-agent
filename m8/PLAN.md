@@ -38,7 +38,7 @@ m8/
 | Phase | Deliverable | Consumes anything? | Gate |
 |---|---|---|---|
 | A0 | `m8_core` pure modules + tests; `Proposal.msg`; `vda_map` for `errors` / `information` | no | H0: contract tests green, no ROS. **Landed 2026-09-06** on a branch cut from `m5-ver3-close`. |
-| A1 | **shadow mode**: C1 classical pocket pose + C2 abort + C3 slot state publish Proposals; gate logs and refuses everything; E1, E3, E4, E5 run | no (R1) | H1: E1 number vs tag, E3 recall/false-abort, E5 RTF cost, all written to EVIDENCE files. **Offline 2026-09-06**: `pytest m8/tests` **79 passed** (see `EVIDENCE_A1_OFFLINE.md`). **Plant 2026-09-11: E1 and E3 RUN, both baselines fail their bar with the cause measured (`EVIDENCE_M8_E1.md`, `EVIDENCE_M8_E3.md`); E4/E5 NOT_RUN; H1 open on the finding.** |
+| A1 | **shadow mode**: C1 classical pocket pose + C2 abort + C3 slot state publish Proposals; gate logs and refuses everything; E1, E3, E4, E5 run | no (R1) | H1: E1 number vs tag, E3 recall/false-abort, E5 RTF cost, all written to EVIDENCE files. **Offline 2026-09-06**: `pytest m8/tests` **79 passed** (see `EVIDENCE_A1_OFFLINE.md`). **Plant 2026-09-11: E1 and E3 RUN, both baselines fail their bar with the cause measured (`EVIDENCE_M8_E1.md`, `EVIDENCE_M8_E3.md`); E4/E5 NOT_RUN; H1 open on the finding.** **C1/C2 reworked 2026-09-11 and measured offline only (`EVIDENCE_M8_C1C2_FIX.md`); the E1/E3 plant re-run is NOT_RUN, so H1 stays open.** |
 | B | **abort live**: gate accepts DOCK_ABORT only (fail-safe direction); E3 re-run on the live cycle; E2 no-regression | abort only | H2: dock plugin still 5/5 on clean cycles; aborts on the fault set |
 | C | **refine live**: delta box fixed from E1; DOCK_TARGET_REFINE accepted inside it; E2 full | refine inside box | H3: no regression on dock truth; strict class reported |
 | D | C3 slot table flows to `state.information`, visible in `fleet/status` and the M7 console; `test_no_frames_leave`, `test_plc_isolation` | reporting only | H4: seam proven: only numbers cross, PLC link untouched |
@@ -61,9 +61,17 @@ need the m5-ver3 plant. Still open, in PLAN order:
       their bars with the cause named (the plane C1/C2 fit is the floor);
       H1 stays open on that finding, not on a missing run.
 - [ ] A1 plant, E4 + E5: still `NOT_RUN`
-- [ ] C1/C2 classical rework or Phase F learned candidate, with E1/E3 as
-      the baseline (a pallet-sized ROI and floor rejection are the obvious
-      first tickets; E1 §"What C1 actually fitted")
+- [~] C1/C2 classical rework, with E1/E3 as the baseline. CLASSICAL
+      option taken, Phase F NOT opened (owner GO 2026-09-11, branch
+      `m8/c1c2-plane-roi-fix`). `m8_core/pocket.py` and `abort.py`
+      rewritten: inverse-depth plane model, per-frame ROI derived from
+      the floor, pallet-sized gate in metres, validated pocket pair,
+      yaw about the floor normal. Measured OFFLINE only —
+      `EVIDENCE_M8_C1C2_FIX.md`, session `scene-20260911-200542`: C1
+      145/150 observed, rms 2-D 0.0092 m vs the 0.0706 m bar, 0 over
+      it; C2 210/210 reason-exact, 0 false aborts on 30 clean frames.
+      OPEN: the plant re-run of E1 and E3 from this branch. Until that
+      runs the bars are unanswered on the rig.
 - [ ] B abort live (gate accepts `DOCK_ABORT` only)
 - [ ] C refine live (delta box fixed from E1 — E1 as run yields NO usable box; C waits on the rework above)
 - [ ] D `state.information` to fleet / M7; isolation tests stay green

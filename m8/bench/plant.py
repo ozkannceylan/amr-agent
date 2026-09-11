@@ -648,8 +648,13 @@ def static_truth(plant: Plant, truck6, pallet6, info: dict) -> dict:
             corners_px.append(uv)
     face_bbox = geom.bbox(corners_px) if len(corners_px) == 4 else None
     image_box = (0.0, float(w), 0.0, float(h))
-    roi_plane = (w // 6, (5 * w) // 6, h // 4, (3 * h) // 4)   # pocket.fit_face_plane
-    roi_band = (0, w, h // 3, (2 * h) // 3)                    # pocket.find_pockets
+    # The A1 FIXED ROIs. m8_core.pocket derives its ROI per frame now,
+    # so these two columns no longer describe what C1 looked at - they
+    # are kept, unchanged, so a re-run is comparable with the E1 and E3
+    # baseline tables that quote them. What C1 actually used is in the
+    # roi_* columns, straight off the observation.
+    roi_plane = (w // 6, (5 * w) // 6, h // 4, (3 * h) // 4)
+    roi_band = (0, w, h // 3, (2 * h) // 3)
     pocket_px = geom.project(p_opt, fx, fy, cx, cy)
     return {
         "pocket_world": pocket,

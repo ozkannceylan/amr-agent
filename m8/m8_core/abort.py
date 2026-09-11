@@ -1,8 +1,33 @@
 """Classical C2 abort classifier. Never emits proceed.
 
 ARCHITECTURE.md §3: pallet absent / rotated / shifted / pocket
-blocked / stringer in fork path. A clean frame yields None — the
+blocked / stringer in fork path. A clean frame yields None - the
 node publishes nothing. `proceed` is not a reason and not a kind.
+
+WHY THIS IS NOT THE A1 CLASSIFIER. `EVIDENCE_M8_E3.md` measured it on
+the plant: it aborted on 540 of 540 static frames including 90 of 90
+clean ones, and on 252 of 252 frames of two live docks the plugin
+finished with error 0. The word it chose depended on range - stringer
+beyond about 1.6 m, rotated inside it - which is the signature of a
+classifier reading the FLOOR: A1 took `c`, the intercept of a plane
+fitted to a fixed central band, as the depth of the pallet face, so
+"columns nearer than the face" was really "floor rows nearer than the
+floor's own average" and "|a| too large" was the floor's slope.
+
+Every test below now runs against the face `pocket.segment` derived
+for this frame, inside the ROI that face occupies. The thresholds are
+argued from the pallet, not fitted to a corpus:
+
+  * ROTATED_ABS_RAD - a 0.160 m wide, 0.800 m deep pocket admits a
+    straight fork only while |yaw| < atan(0.160/0.800) = 0.1974 rad.
+    0.15 rad is that limit with margin for the pose error itself.
+  * SHIFTED_LATERAL_M - past the pallet's own half width the forks
+    miss it. See the caution on `target_u` below.
+  * STRINGER_NEAR_M - the pocket mouth is 0.122 m tall; 0.04 m of
+    something nearer than the face is inside the fork path. It is
+    measured over the whole standing object (`near_face_fraction`),
+    because a bar in front of the face projects BELOW the face rows -
+    at 1.0 m it misses them completely.
 """
 from __future__ import annotations
 
@@ -14,82 +39,75 @@ from .contract import (
     SENSOR_PALLET_CAM,
     make_proposal,
 )
-from .pocket import DepthFrame, _col_median, fit_face_plane, find_pockets, observe
+from .pocket import (
+    DepthFrame,
+    face_yaw,
+    find_pocket_pair,
+    near_face_fraction,
+    segment,
+)
 
 DEFAULT_TTL_MS = 200
 
-# Heuristic thresholds for the synthetic fixtures and as a starting
-# point on the plant. E3 will replace them with measured bars; they
-# are not a claimed recall.
 ABSENT_VALID_FRAC = 0.15
-ROTATED_ABS_A = 0.25          # |a| in z = a x + b y + c
-SHIFTED_U_FRAC = 0.18         # pocket midline vs image centre
-STRINGER_NEAR_FRAC = 0.12     # columns closer than face by 4 cm
+ROTATED_ABS_RAD = 0.15
+STRINGER_NEAR_M = 0.04
+STRINGER_NEAR_FRAC = 0.06
+# CAUTION, and it is the open limitation of this classifier. With no
+# `target_u` the only reference is the image centre, and on this rig the
+# pallet camera is mounted 0.40 m off the vehicle centreline, so a
+# correctly staged pallet already sits 0.40 m off-axis. The threshold
+# therefore has to be a GROSS one - half a pallet plus margin - and a
+# shift small enough to miss a pocket will not be caught. The node has
+# the tag-derived target and should pass it.
+SHIFTED_LATERAL_M = 0.70
 
 
-def classify(frame: DepthFrame) -> Optional[str]:
-    """Return an ABORT_REASONS member, or None if the frame looks clean."""
+def classify(frame: DepthFrame,
+             target_u: Optional[float] = None) -> Optional[str]:
+    """Return an ABORT_REASONS member, or None if the frame looks clean.
+
+    `target_u` is the column the tag-derived dock target projects to. It
+    is not ground truth and it is not required; without it the lateral
+    test is the gross one described above.
+    """
     valid = frame.valid_count()
     if valid < ABSENT_VALID_FRAC * frame.width * frame.height:
         return "pallet_absent"
 
-    plane = fit_face_plane(frame)
-    if plane is None:
+    seg = segment(frame)
+    if seg is None:
+        # No pallet-sized surface stands above the dominant plane. On a
+        # frame that is all floor the fallback candidate IS the floor,
+        # and the dz/dy guard in `segment` is what rejects it.
         return "pallet_absent"
-    a, _b, c, _n = plane
 
-    if abs(a) > ROTATED_ABS_A:
+    if abs(face_yaw(seg.face, seg.up)) > ROTATED_ABS_RAD:
         return "pallet_rotated"
 
-    # Stringer: a band of nearer-than-face columns across the lower
-    # third — a ridge in the fork path, not a pocket (pockets are deeper).
-    v0 = (2 * frame.height) // 3
-    near = 0
-    cols = 0
-    for u in range(frame.width):
-        zs = [frame.at(u, v) for v in range(v0, frame.height)]
-        zs = [z for z in zs if z is not None]
-        if not zs:
-            continue
-        cols += 1
-        zs.sort()
-        if zs[len(zs) // 2] < c - 0.04:
-            near += 1
-    if cols and (near / cols) > STRINGER_NEAR_FRAC:
+    if near_face_fraction(frame, seg, STRINGER_NEAR_M) > STRINGER_NEAR_FRAC:
         return "stringer_in_path"
 
-    pockets = find_pockets(frame, c)
-    if pockets is None:
-        # A single off-centre valley is a shift, not a missing pocket
-        # pair. Two-cluster failure with no deeper columns is blocked.
-        v0 = frame.height // 3
-        v1 = (2 * frame.height) // 3
-        deeper = []
-        for u in range(frame.width):
-            med = _col_median(frame, u, v0, v1)
-            if med is not None and med > c + 0.04:
-                deeper.append(u)
-        if deeper:
-            u_mid = sum(deeper) / len(deeper)
-            if abs(u_mid - frame.cx) > SHIFTED_U_FRAC * frame.width:
-                return "pallet_shifted"
+    pair = find_pocket_pair(frame, seg)
+    if pair is None:
         return "pocket_blocked"
+    u_mid, v_mid, _span = pair
 
-    u_mid, _v = pockets
-    if abs(u_mid - frame.cx) > SHIFTED_U_FRAC * frame.width:
+    z = seg.face.depth_at(frame.x_of(u_mid), frame.y_of(v_mid))
+    if z is None:
+        return "pocket_blocked"
+    tu = frame.cx if target_u is None else float(target_u)
+    lateral = (u_mid - tu) / frame.fx * z
+    if abs(lateral) > SHIFTED_LATERAL_M:
         return "pallet_shifted"
-
-    # Observe is the last word: if the pocket fit itself failed after
-    # the cheap checks, treat as blocked rather than inventing proceed.
-    if observe(frame) is None:
-        return "pocket_blocked"
     return None
 
 
 def propose(frame: DepthFrame,
             ttl_ms: int = DEFAULT_TTL_MS,
-            confidence: float = 0.8) -> Optional[object]:
-    reason = classify(frame)
+            confidence: float = 0.8,
+            target_u: Optional[float] = None) -> Optional[object]:
+    reason = classify(frame, target_u=target_u)
     if reason is None:
         return None
     return make_proposal(

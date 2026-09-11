@@ -5,6 +5,8 @@ Status: **RUN 2026-09-11** on the m5-ver3 plant, this rig. Session
 `cycles.csv` 252 live rows, `summary.json`, `session.json`; every
 number below is in them).
 
+SUPERSEDED AS A BASELINE, NOT AS A RESULT (added 2026-09-11): the C1/C2 rework this file asked for is measured offline in `EVIDENCE_M8_C1C2_FIX.md` on branch `m8/c1c2-plane-roi-fix`. The plant re-run of E3 is still NOT_RUN, so every number below stands as the last thing the rig said. Nothing here was edited and no result folder was overwritten.
+
 **Verdict: the A1 classical C2 aborts on every frame it saw.** 540 of
 540 static frames — the 90 clean ones included — and 252 of 252 frames
 across two clean live dock approaches that `opennav_docking` completed
