@@ -10,7 +10,10 @@ _SCRIPTS = ("e1_pocket.py", "e3_abort.py", "e4_slot.py", "e5_cost.py")
 
 
 @pytest.mark.parametrize("name", _SCRIPTS)
-def test_bench_prints_not_run_and_exits_2(name, capsys):
+def test_bench_prints_not_run_and_exits_2(name, capsys, monkeypatch):
+    # A plant session exports GZ_PARTITION; pytest is not one. Without it
+    # every bench must say NOT_RUN even while a plant runs beside it.
+    monkeypatch.delenv("GZ_PARTITION", raising=False)
     path = _BENCH / name
     with pytest.raises(SystemExit) as caught:
         runpy.run_path(str(path), run_name="__main__")

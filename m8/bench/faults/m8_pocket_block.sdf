@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- E3 fault `pocket_blocked`: a static block across BOTH pocket openings,
+     sized wider than the two openings (|y| < 0.36 m) and as tall as the
+     blocks. Spawned by m8/bench/faults/inject.py with its +X along the
+     pallet's +X, 0.06 m in front of the face. Never written into a world. -->
+<sdf version="1.9">
+  <model name="m8_pocket_block">
+    <static>true</static>
+    <link name="body">
+      <collision name="c">
+        <geometry><box><size>0.10 0.72 0.10</size></box></geometry>
+      </collision>
+      <visual name="v">
+        <geometry><box><size>0.10 0.72 0.10</size></box></geometry>
+        <material><ambient>0.35 0.35 0.38 1</ambient><diffuse>0.35 0.35 0.38 1</diffuse></material>
+      </visual>
+    </link>
+  </model>
+</sdf>

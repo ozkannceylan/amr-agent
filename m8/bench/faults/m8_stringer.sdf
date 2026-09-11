@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- E3 fault `stringer_in_path`: a low static ridge lying across the fork
+     path, 0.60 m in front of the face, 0.06 m tall. Spawned by
+     m8/bench/faults/inject.py with its +X along the pallet's +X. Never
+     written into a world. -->
+<sdf version="1.9">
+  <model name="m8_stringer">
+    <static>true</static>
+    <link name="body">
+      <collision name="c">
+        <geometry><box><size>0.08 1.00 0.06</size></box></geometry>
+      </collision>
+      <visual name="v">
+        <geometry><box><size>0.08 1.00 0.06</size></box></geometry>
+        <material><ambient>0.45 0.32 0.18 1</ambient><diffuse>0.45 0.32 0.18 1</diffuse></material>
+      </visual>
+    </link>
+  </model>
+</sdf>

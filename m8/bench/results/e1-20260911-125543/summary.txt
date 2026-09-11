@@ -1,0 +1,17 @@
+E1 pocket pose vs gz truth - session e1-20260911-125543
+bar (quoted): tag rms 0.0706 m / 211 samples at staging (R1). Not a number this script produced.
+labels: {'traction': 'nominal', 'arm': 'wheel+imu', 'loc': 'amcl@735cdbc6', 'nav': 'on@7f57e6cf', 'dock': 'on@1676eac0', 'docking': 'on@a462315f', 'monitor': 'off', 'partition': 'm5v3', 'log_dir': '/mnt/c/Users/ozkan/projects/amr-agent-m5v3/m5_ver3/logs/run-20260911-124107'}
+frames per pose: 30  ranges: staging,1.5,1.0
+
+pose                n  obs   cam_m face%roi  rms_lat  rms_rng   rms_2d  rms_yaw  rms_map
+staging            30    0   2.245      2.9                                             
+approach_1.50m     30    0   1.500      4.9                                             
+approach_1.00m     30   30   1.000      6.6   0.6080   0.6935   0.9223   0.3823   1.0342
+
+[staging] truth lateral -0.4000 range 2.4637 yaw -0.0000 | chain check (depth at pocket px - truth range) mean 0.0005 max|.| 0.0082 n 30 | observe median 0.071 s
+      plane C1 fitted on 30/30 frames: c (range on axis) mean 2.2669 m vs truth 2.4637 (err mean -0.1968), slope a mean 0.0595 b mean -4.0394, points n median 60951
+[approach_1.50m] truth lateral -0.4000 range 1.8185 yaw -0.0000 | chain check (depth at pocket px - truth range) mean -0.0007 max|.| 0.0075 n 30 | observe median 0.069 s
+      plane C1 fitted on 30/30 frames: c (range on axis) mean 2.1937 m vs truth 1.8185 (err mean 0.3752), slope a mean 0.1882 b mean -3.4955, points n median 58634
+[approach_1.00m] truth lateral -0.4000 range 1.3855 yaw -0.0000 | chain check (depth at pocket px - truth range) mean 0.0008 max|.| 0.0077 n 30 | observe median 0.078 s
+      plane C1 fitted on 30/30 frames: c (range on axis) mean 2.0791 m vs truth 1.3855 (err mean 0.6935), slope a mean 0.4020 b mean -2.5649, points n median 61193
+      est lateral mean 0.2081 range mean 2.0791 yaw mean 0.3823 | errors: lat mean 0.6080 range mean 0.6935 2d max 0.9225 yaw max|.| 0.3830

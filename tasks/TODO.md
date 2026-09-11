@@ -237,3 +237,49 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
 Bilinen riskler: MPPI Ackermann geri-viraj sapması (nav2 #5714, açık;
 undock ile hafifletilir) · ros_gz köprüsü RTF yer (pointcloud köprüleme,
 gz-sensors #545 hizasızlık) · gpu_lidar sığ açı hatası (gz-sim #2743).
+
+---
+
+# M8 H1 plant benches — E1 + E3 on the m5-ver3 plant (branch m5-ver3-close)
+
+Session B, 2026-09-11, device ozkan_notebook (RTX 4050, WSL Ubuntu 24.04,
+gz-sim 8.11.0, ROS 2 Jazzy). Plan first, then run. E4/E5 stay NOT_RUN.
+
+Plan (Fable):
+- [x] 0. Verify device: nvidia-smi on Windows AND in WSL, gz sim 8.11 in
+      the sourced Jazzy shell, repo mount, worktree on m5-ver3-close,
+      `pytest m8/tests` 79 passed, DirectionStablePath built.
+- [x] 1. `m8/bench/geom.py` — pure maths: RPY rotations, world -> optical
+      through vehicle.cam_mount + cam_optical, pinhole projection, pallet
+      face / pocket-pair truth points, rms. Test with hand-derived
+      staging numbers (`m8/tests/test_bench_geom.py`).
+- [x] 2. `m8/bench/plant.py` — the plant as instrument: state file gate
+      (traction/arm/loc/nav/dock/docking), gz set_pose / create / remove /
+      model pose readback, AMCL seed, depth+info+truth capture (rclpy
+      inside functions), session writer under m8/bench/results/.
+- [x] 3. E1: truck teleported to heading-aligned staging (camera 2.245 m
+      from the face) and two approach poses (1.5 m, 1.0 m); 30 depth
+      frames each; `m8_core.pocket.observe` per frame; score lateral +
+      range (camera frame) vs gz truth, plus the map-chain column through
+      TF + the committed registration (the tag bar's instrument).
+      Write EVIDENCE_M8_E1.md with n, rms, per-axis, per-frame latency.
+- [x] 4. E3: fault set by world state at staging + 1.0 m: clean,
+      pallet_absent (teleport away), pallet_rotated (+0.35 rad),
+      pallet_shifted (+0.30 m lateral), pocket_blocked (box across both
+      openings), stringer_in_path (low ridge 0.6 m ahead). Recall per
+      fault + reason-exact rate; false-abort on clean static frames AND
+      on live clean dock cycles (dock_bench record --from-staging).
+      Write EVIDENCE_M8_E3.md with the confusion table.
+- [x] 5. `pytest m8/tests` green (NOT_RUN contract kept when the plant is
+      absent); PLAN.md / README.md status lines; commit on m5-ver3-close;
+      push.
+
+Review: E1 e1-20260911-125543 (C1 0/30, 0/30, 30/30 at rms 0.92 m; plane = floor,
+face 3-7 % of ROI). E3 e3-20260911-125645 (540/540 static aborts incl. 90/90 clean;
+252/252 on two clean docks, truth 0.2587 / 0.2620 m). Suite 88 passed on Windows
+and in WSL beside the live plant; NOT_RUN contract held. E4/E5 NOT_RUN. H1 open
+on the finding. Rig lesson: a worktree checked out with autocrlf=true breaks the
+registration md5 gate (CRLF in registration.yaml); LF checkout fixed it.
+
+Rules carried: no algorithm tuning inside a bench; ground truth is a
+score, not a command; instrument floors named; frames stay on the rig.
