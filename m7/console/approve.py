@@ -1,4 +1,5 @@
-"""approve.py — operator list / approve / reject. Standalone Phase 2a.
+"""approve.py — operator list / approve / reject. Phase 2a standalone;
+Phase 2b registers the same commands on fleet_cli.
 
 Bound by the fleet/ invariants (no ROS here; the only path to a vehicle
 is VDA 5050, and this file is not on that path; losing the fleet
@@ -13,9 +14,9 @@ this command's client id. The screen is the retained fleet/proposals
 document, read the same way fleet_cli status reads fleet/status —
 same helpers, imported, not copied.
 
-Phase 2b will register these commands on fleet_cli; this file stays
-the implementation. It is not a second master and it does not
-publish fleet/task/submit.
+Phase 2b registers these commands on fleet_cli (one import, one
+add_parser). This file stays the implementation. It is not a second
+master and it does not publish fleet/task/submit.
 """
 from __future__ import annotations
 

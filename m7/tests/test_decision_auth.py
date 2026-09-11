@@ -246,3 +246,24 @@ def test_parser_accepts_list_approve_reject():
 def test_main_without_command_is_usage(monkeypatch):
     monkeypatch.setattr(sys, "stderr", io.StringIO())
     assert approve.main([]) == 2
+
+
+def test_phase_2b_fleet_cli_registers_approve(monkeypatch):
+    """PLAN Phase 2b: one fleet_cli subcommand, same approve.main."""
+    seen = {}
+
+    def fake_main(argv=None):
+        seen["argv"] = list(argv or [])
+        return 0
+
+    monkeypatch.setattr(approve, "main", fake_main)
+    rc = approve.fleet_cli.main([
+        "--host", "10.0.0.9", "--port", "1884",
+        "approve", "approve", "pr-1",
+    ])
+    assert rc == 0
+    assert seen["argv"][:4] == ["--host", "10.0.0.9", "--port", "1884"]
+    assert seen["argv"][4:] == ["approve", "pr-1"]
+    list_rc = approve.fleet_cli.main(["approve", "list"])
+    assert list_rc == 0
+    assert seen["argv"][-1] == "list"
