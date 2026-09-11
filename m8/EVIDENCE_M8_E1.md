@@ -154,7 +154,7 @@ not the node's RTF cost — that is E5, still NOT_RUN.
 
 | file | md5 |
 |---|---|
-| `m8/bench/results/e1-20260911-125543/frames.csv` (90 rows) | `b7bfdd19cc6f19a1d9225efcb59efe1f` |
+| `m8/bench/results/e1-20260911-125543/frames.csv` (90 rows) | `47e887c0b3a139a2b0a0cd65604df698` |
 | `m8/bench/results/e1-20260911-125543/summary.json` | `62d3a05eb70f06d7b50dbbe8e6536ed6` |
 | `m8/bench/results/e1-20260911-125543/session.json` | `c6e362e2698de20b9a391439c45c4cdd` |
 | `m8/bench/results/e1-20260911-125543/summary.txt` | `fd6f0a855755462eae3b8f4448a914fa` |

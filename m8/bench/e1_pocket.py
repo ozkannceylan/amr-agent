@@ -309,7 +309,8 @@ def run(args) -> int:
 
     csv_path = os.path.join(dest, "frames.csv")
     with open(csv_path, "w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS, extrasaction="ignore")
+        writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS, extrasaction="ignore",
+                                lineterminator="\n")
         writer.writeheader()
         for row in all_rows:
             writer.writerow({k: _fmt(row.get(k), 6) if isinstance(row.get(k), float)

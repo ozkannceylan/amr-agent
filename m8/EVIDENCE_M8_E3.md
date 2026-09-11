@@ -170,8 +170,8 @@ Python, inside the bench process). During the cycles the stream kept
 
 | file | md5 |
 |---|---|
-| `m8/bench/results/e3-20260911-125645/frames.csv` (540 rows) | `77ace4d3e49ce17b6172fee4847d16cb` |
-| `m8/bench/results/e3-20260911-125645/cycles.csv` (252 rows) | `e844cdb349c6012880b0060b7b92f4a1` |
+| `m8/bench/results/e3-20260911-125645/frames.csv` (540 rows) | `778e5b1ef18a38cdf4ad55b1654e5acd` |
+| `m8/bench/results/e3-20260911-125645/cycles.csv` (252 rows) | `6af852cc36ec2d46be95579db7a38dc4` |
 | `m8/bench/results/e3-20260911-125645/summary.json` | `0a64545a11f4f62086edb1ed59178fa2` |
 | `m8/bench/results/e3-20260911-125645/session.json` | `5a9277893238b420c563fe3fe72eeb15` |
 | `m8/bench/results/e3-20260911-125645/summary.txt` | `b6e77f7f6c1354cc5c3dd34c3365f944` |

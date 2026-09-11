@@ -374,7 +374,8 @@ def run(args) -> int:
 
     def _dump(path, fields, rows):
         with open(path, "w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+            writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore",
+                                    lineterminator="\n")
             writer.writeheader()
             for row in rows:
                 writer.writerow({k: _fmt(row.get(k), 6) if isinstance(row.get(k), float)
