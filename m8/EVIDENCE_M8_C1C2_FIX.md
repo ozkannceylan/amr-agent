@@ -1,7 +1,10 @@
 # EVIDENCE_M8_C1C2_FIX — the classical rework of C1 and C2
 
-Status: **OFFLINE MEASURED 2026-09-11**, plant re-run **NOT_RUN**.
-Session `m8/bench/results/scene-20260911-200542/`. Branch
+Status: **OFFLINE MEASURED 2026-09-11; E1 AND E3 RE-RUN ON THE PLANT
+2026-09-12** - see "On the plant" below, which supersedes the offline
+numbers wherever the two disagree. E4/E5 remain NOT_RUN. Phase B stays
+on HOLD: the live-dock false-abort rate does not support enabling it.
+Offline session `m8/bench/results/scene-20260911-235921/`. Branch
 `m8/c1c2-plane-roi-fix`, cut from `m5-ver3-close`.
 
 This is the ticket `EVIDENCE_M8_E1.md` and `EVIDENCE_M8_E3.md` asked
@@ -150,27 +153,173 @@ word no longer depends on range. `classify` mean 0.085 s, max 0.288 s.
 
 `proceed` is still not a reason and not a kind.
 
+## On the plant - E1 and E3 re-run, 2026-09-12
+
+Same rig, same labels as the H1 baseline run: `traction=nominal`
+`arm=wheel+imu` `loc=amcl@735cdbc6` `nav=on@7f57e6cf` `dock=on@1676eac0`
+`docking=on@a462315f` `monitor=off` `partition=m5v3`, bringup
+`run-20260911-235938`, 22 alive / 0 dead, GPU
+`D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)`, CameraInfo fx = fy =
+337.357. Nothing was tuned between the offline bench and these runs
+except the two plant findings below, each of which was measured first.
+
+### E1 - pocket pose, session `e1-20260912-000726`, 30 frames per pose
+
+| pose | observed | rms lat | rms range | **rms 2-D** | rms yaw | **rms map chain** |
+|---|---|---|---|---|---|---|
+| staging 2.245 m | **30 / 30** | 0.0018 | 0.0064 | **0.0067 m** | 0.0012 rad | **0.0564 m** |
+| approach 1.5 m | **30 / 30** | 0.0036 | 0.0070 | **0.0079 m** | 0.0015 rad | 0.0922 m |
+| approach 1.0 m | **0 / 30** | - | - | - | - | - |
+
+**The bar is the tag chain AT STAGING: rms 0.0706 m over 211 samples.
+At staging, on the bar's own chain and the bar's own pose, C1 now reads
+0.0564 m. THE BAR IS MET.** A1 read 0/30 there.
+
+The 1.5 m map-chain figure, 0.0922 m, is above 0.0706 m and is **not a
+comparison the bar supports** - the bar was measured at staging and has
+no 1.5 m counterpart. Both map figures carry the localiser: the
+registration instrument floor alone is rms 0.0291 / MAX 0.1179 m, and
+the camera-frame column, which has no localiser in it, is 0.0067 and
+0.0079 m.
+
+Against the baseline, same three poses, same instrument:
+
+| | A1 (`e1-20260911-125543`) | now |
+|---|---|---|
+| staging | 0 / 30 | 30 / 30 at 0.0067 m |
+| 1.5 m | 0 / 30 | 30 / 30 at 0.0079 m |
+| 1.0 m | 30 / 30 at **0.9223 m** (map 1.0342 m) | 0 / 30, refused by name |
+| yaw on a square pallet | +0.3823 rad | 0.0012-0.0015 rad |
+
+The derived ROI on the plant matches what the renderer predicted, which
+is the cross-check that the offline instrument was worth having: staging
+rows 202-213 cols 182-347 (offline 202-215 / 182-347), face width
+1.2028 m (offline 1.203), pocket span 0.5567 m (offline 0.561, geometry
+0.560). `observe` ran 0.044-0.049 s mean against A1's 0.071-0.078 s
+median.
+
+### Two plant findings, both named by the code
+
+`m8/bench/diag_segment.py` is new and exists because `observed 0/30` is
+not a diagnosis. Every refusal in `pocket` now carries a name.
+
+**1. At staging the largest standing object was a WALL.** The pallet is
+2.9 % of the frame at 2.245 m; a warehouse wall behind it is not.
+Taking only the largest component above the floor picked a surface
+0.807 m wide and 1.3555 m tall at 2.6432 m,
+`face_height_not_pallet_sized` - a refusal with a pallet in plain view.
+The segmentation now tries every candidate, best first, through the
+whole gate set. Nothing was loosened. This is what turned staging from
+0/30 into 30/30.
+
+**2. At 1.0 m the truck's own forks are continuous with the pallet.**
+A vehicle-fixed structure sits 0.5-1.0 m from this camera at 0.1 m above
+the floor - about 730 coarse cells with the same signature at 1.0, 1.5
+and 2.245 m, which is what identifies it as the truck's own forks rather
+than scenery. At 1.5 m and staging there is clean floor between it and
+the pallet, so it is a separate component. At 1.0 m it abuts the pallet
+with **no range discontinuity** (adjacent-cell steps p50 0.0103, p90
+0.0355, p99 0.0546, max 0.0721 m, and no step at the junction), so
+depth-aware connectivity cannot split them either. The merged blob
+leaves the face at 23-25 % of candidates and
+`face_is_too_small_a_share` refuses. **The refusal is kept.** A wrong
+pose in the last metre is worse than none, that regime belongs to
+`opennav_docking`, and no threshold was moved to make it pass.
+
+### E3 - abort classifier, session `e3-20260912-000826`
+
+540 static frames (6 conditions x 3 poses x 30) and 2 clean live docks.
+
+| staged condition | staging | 1.5 m | 1.0 m | exact overall |
+|---|---|---|---|---|
+| clean | **0 / 30 abort** | **0 / 30 abort** | 30 / 30 abort | - |
+| pallet_absent | 30/30 | 30/30 | 30/30 | **90 / 90** |
+| pallet_rotated 0.35 rad | 30/30 | 30/30 | 30/30 | 60 / 90 |
+| pallet_shifted 0.30 m | 0/30 | 0/30 | 30/30 | 0 / 90 |
+| pocket_blocked | 30/30 | 30/30 | 30/30 | 6 / 90 |
+| stringer_in_path | 0/30 | 0/30 | 30/30 | 0 / 90 |
+
+**The headline result: 60 of 90 clean static frames now read `none`.
+A1 aborted on 90 of 90.** At staging and 1.5 m the false-abort rate on
+clean frames is **0 / 30 and 0 / 30**. `pallet_absent` is exact 90/90
+and `pallet_rotated` is exact wherever C1 can see the face at all.
+
+**Everything at 1.0 m reads `pallet_absent`**, in all six conditions,
+because C1 refuses there - finding 2 above. It is conservative (it
+aborts rather than proceeding) and it is still wrong: the word claims
+an empty bay when the pallet is there.
+
+**Live clean docks: false-abort 0.884 overall** (948 aborts of 1073
+classified frames), against A1's 252/252 = 1.000. Cycle 0 was 0.937
+(997 frames), cycle 1 was 0.184 (76 frames). Both plugin runs finished
+`success=True error=0`. The cycle-to-cycle asymmetry, and why cycle 0
+classified 13x more frames than cycle 1, is **not explained**.
+
+**PHASE B (abort live) STAYS ON HOLD.** A classifier that aborts 88 %
+of the frames of a dock the plugin completes cleanly is not one to put
+in front of a gate, and nothing here argues otherwise.
+
+### Three misses, each with the cause named
+
+1. **`pallet_shifted` 0.30 m: not caught at staging or 1.5 m** (both
+   read `none`). This is the limitation already documented above, now
+   measured: without a `target_u` the threshold has to be
+   `SHIFTED_LATERAL_M` = 0.70 m, because the pallet camera is mounted
+   0.40 m off the centreline and a correctly staged pallet is already
+   that far off-axis. A 0.30 m shift is inside the gross threshold by
+   construction. The fix is to pass the tag-derived target; the
+   argument exists and the node is not yet wired to it.
+2. **`stringer_in_path`: not caught at staging or 1.5 m.** The staged
+   ridge is a 0.08 x 1.00 x 0.06 m box 0.6 m in front of the pallet.
+   `fork_path_fraction` searches the standing object it segmented, and
+   a ridge 0.6 m in front of the pallet is a DIFFERENT component that
+   never enters that region. Widening the search to the whole fork
+   corridor is the obvious fix and this run says it cannot be done
+   safely on this camera: at the 1.5 m pose the staged ridge sits at
+   0.9 m, inside the 0.5-1.0 m band the truck's own forks occupy at
+   every pose, so a corridor search would abort on every clean frame
+   instead. Separating them needs a self-mask from the mast/fork joint
+   state, which `m8_core` does not have. **Named and left open, not
+   patched.**
+3. **`pocket_blocked`: aborts 90/90 but with the wrong word** (84
+   `pallet_absent`, 6 `pocket_blocked`). The 0.10 x 0.72 x 0.10 m box
+   across the openings changes the segmented object enough that C1
+   refuses before the pocket test is reached. Cause not established -
+   this one is open with its numbers, not with an explanation.
+
+`classify` ran median 0.073 s, max 0.959 s over 1613 frames.
+
 ## Open, by name
 
-1. **The plant has not been re-run.** E1 and E3 are the score and they
-   are NOT_RUN on this branch. Every number above is rendered.
-2. **C1 refuses 5 of 50 frames at 1.0 m when the pallet is yawed
-   ±0.10 rad** (3 at −0.10, 2 at +0.10). All five are refusals — no
-   pose emitted — not wrong poses. At 1.0 m the face fills the frame,
-   a 0.10 rad yaw spreads it 0.12 m in horizontal distance, and the
-   validated pocket pair does not always survive. Square pallets at
-   1.0 m: 10 / 10.
-3. **`pallet_shifted` without a `target_u` is a gross test only.** The
+1. **C1 sees nothing at 1.0 m on the plant** - the truck's own forks
+   are continuous with the pallet at that range. Measured, named,
+   refused rather than guessed. `opennav_docking` owns that regime
+   and E1's own framing is the last two metres, but this is a real
+   loss of coverage against A1, which produced a pose there (a wrong
+   one, at 0.9223 m).
+2. **Phase B cannot open on these numbers.** 0.884 live false-abort
+   on two clean docks the plugin finished with error 0.
+3. **`pocket_blocked` aborts with the wrong word** 84 times in 90.
+   Cause not established.
+4. **`stringer_in_path` needs a fork self-mask** before its search
+   can widen beyond the pallet's own footprint.
+5. **The live-cycle frame counts are unexplained** - 997 vs 76.
+6. **Offline only:** C1 refuses 5 of 50 rendered frames at 1.0 m
+   when the pallet is yawed +-0.10 rad. All five are refusals, not
+   wrong poses.
+7. **`pallet_shifted` without a `target_u` is a gross test only.** The
    pallet camera is mounted 0.40 m off the centreline, so a correctly
    staged pallet is always 0.40 m off-axis and the threshold has to be
    0.70 m. A shift small enough to miss a 0.16 m pocket will not be
    caught. `classify(frame, target_u=...)` exists and the node has the
    tag-derived target; wiring it is not done here.
-4. **A load on the pallet is untested.** The height gate tops out at
+8. **A load on the pallet is untested.** The height gate tops out at
    0.60 m; a boxed pallet would exceed it and read `pallet_absent`.
-5. **Domain gap.** Rendered depth is not a gz GPU depth camera and
-   neither is a real D455. Inherited from E1, unchanged.
-6. **`find_pockets(frame, face_z)` was removed** from `m8_core.pocket`
+9. **Domain gap.** gz depth is not a real D455. Inherited from E1,
+   unchanged. The rendered instrument is now cross-checked against
+   the plant - ROI, face width and pocket span agree to a few
+   millimetres - which is the most that can be said for it.
+10. **`find_pockets(frame, face_z)` was removed** from `m8_core.pocket`
    and replaced by `find_pocket_pair(frame, seg)`. It took a scalar
    face depth, which no longer exists as an input. Nothing outside
    `m8_core` and the tests called it.
@@ -179,10 +328,20 @@ word no longer depends on range. `classify` mean 0.085 s, max 0.288 s.
 
 | file | md5 |
 |---|---|
-| `m8/bench/results/scene-20260911-200542/c1_frames.csv` (150 rows) | `daa3b00274fe2f54881a44bd8148b9e0` |
-| `m8/bench/results/scene-20260911-200542/c2_frames.csv` (210 rows) | `bd9b12742c4d9427912d81c1b6ec8191` |
-| `m8/bench/results/scene-20260911-200542/summary.json` | `8e6c930c6a32c5b559053d584811f620` |
-| `m8/bench/results/scene-20260911-200542/summary.txt` | `95e41a40739a0d2407c1824cc1c626d2` |
+| `m8/bench/results/scene-20260911-235921/c1_frames.csv` (150 rows) | `631895ea011364eeb9b14a4a5668dc23` |
+| `m8/bench/results/scene-20260911-235921/c2_frames.csv` (210 rows) | `93df4432fad19498a500132185387e73` |
+| `m8/bench/results/scene-20260911-235921/summary.json` | `9acd6fa737fdbe2dfcf989b25de2ab00` |
+| `m8/bench/results/scene-20260911-235921/summary.txt` | `9f94dbcd140ad8620ea6f35a9f3bc598` |
+| `m8/bench/results/e1-20260912-000726/frames.csv` (90 rows) | `bd52a48a36512064da2ecd8aab8d4d2d` |
+| `m8/bench/results/e1-20260912-000726/summary.json` | `600b93a5ebaae355fa0f3a868a83aee4` |
+| `m8/bench/results/e1-20260912-000726/summary.txt` | `33c27ff3f3fc56e732ce635452291ad3` |
+| `m8/bench/results/e1-20260912-000726/session.json` | `6d565ee760a3a0a7edf313714d2f950d` |
+| `m8/bench/results/e3-20260912-000826/frames.csv` (540 rows) | `54f76d9082e594c63b16c82fc112dce1` |
+| `m8/bench/results/e3-20260912-000826/cycles.csv` (1073 rows) | `ebc7691b1ad7b4596ad14c700863b2ef` |
+| `m8/bench/results/e3-20260912-000826/summary.json` | `501d6374d6b6e1348841bf9c611692b2` |
+| `m8/bench/results/e3-20260912-000826/summary.txt` | `996fec01c8b2ec40c95ed1c548f759f7` |
+| `m8/bench/results/e3-20260912-000826/session.json` | `284c79e3dca1f435ee2286b91209e315` |
+| `m8/bench/results/e1-20260912-000119/` (the first E1, before the multi-candidate fix; kept because it is what named the wall) | `21cb0a7f152f3c4bb251480ad266c91a` (frames.csv) |
 
 Code: `m8/m8_core/pocket.py` (rewritten), `m8/m8_core/abort.py`
 (rewritten), `m8/m8_core/scene.py` (new), `m8/bench/offline_scene.py`
@@ -196,10 +355,20 @@ Suite: **109 passed** (A1 offline: 79), `python -m pytest m8/tests`,
 
 ## Next
 
-Re-run E1 and E3 on the m5-ver3 plant from this branch and write the
-result into new `m8/bench/results/` sessions. Per
-`m8-h1-plant-run-2026-09-11`: do not re-run them to "confirm" the
-baseline — run them after this change, which is what they are for.
-Rig conditions: LF working tree (CRLF breaks the map md5 gate),
-`GZ_PARTITION=m5v3 ROS_DOMAIN_ID=97`, Jazzy sourced,
-`python3 m8/bench/plant.py probe` as the smoke test.
+E1 and E3 are RUN. What is left, in the order the numbers argue for it:
+
+1. Wire the tag-derived target into `abort.classify(target_u=...)` and
+   `pocket.observe(expected_range=...)` in the shadow nodes. It is the
+   single change that answers miss 1 and narrows the window everywhere.
+2. Decide what C1 should do in the last metre, given that the forks and
+   the pallet are one surface to this camera. Two options are measured
+   enough to choose between: hand the regime to `opennav_docking` by
+   contract, or add a fork self-mask from the mast joint state.
+3. Explain `pocket_blocked`'s word, and the live-cycle frame counts.
+4. E4 and E5 remain NOT_RUN.
+
+Phase B stays on HOLD until the live false-abort rate is a number a
+gate could stand on. Rig conditions for the next run: LF working tree
+(CRLF breaks the map md5 gate), `GZ_PARTITION=m5v3 ROS_DOMAIN_ID=97`,
+Jazzy sourced, `python3 m8/bench/plant.py probe` as the smoke test, and
+`python3 m8/bench/diag_segment.py` whenever a bench says `observed 0/n`.

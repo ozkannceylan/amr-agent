@@ -1,0 +1,31 @@
+E3 abort classifier vs staged faults - session e3-20260912-000826
+labels: {'traction': 'nominal', 'arm': 'wheel+imu', 'loc': 'amcl@735cdbc6', 'nav': 'on@7f57e6cf', 'dock': 'on@1676eac0', 'docking': 'on@a462315f', 'monitor': 'off', 'partition': 'm5v3', 'log_dir': '/mnt/c/Users/ozkan/projects/amr-agent-m5v3/m5_ver3/logs/run-20260911-235938'}
+frames per condition: 30  ranges: staging,1.5,1.0  cycles: 2
+fault set: {'rotated_rad': 0.35, 'shifted_m': 0.3, 'block_ahead_m': 0.06, 'block_z_m': 0.06, 'stringer_ahead_m': 0.6, 'stringer_z_m': 0.03, 'absent_xy': (-17.0, 10.0), 'boxes': {'pocket_blocked': 'm8_pocket_block.sdf', 'stringer_in_path': 'm8_stringer.sdf'}}
+
+abort rate (any reason) = aborts/frames; [exact] = reason names the staged fault
+condition                    staging    approach_1.50m    approach_1.00m     overall
+clean                     0/30 [  0]        0/30 [  0]       30/30 [  0]       30/90
+pallet_absent            30/30 [ 30]       30/30 [ 30]       30/30 [ 30]       90/90
+pallet_rotated           30/30 [ 30]       30/30 [ 30]       30/30 [  0]       90/90
+pallet_shifted            0/30 [  0]        0/30 [  0]       30/30 [  0]       30/90
+pocket_blocked           30/30 [  6]       30/30 [  0]       30/30 [  0]       90/90
+stringer_in_path          0/30 [  0]        0/30 [  0]       30/30 [  0]       30/90
+
+camera range per pose: staging 2.245 m, approach_1.50m 1.500 m, approach_1.00m 1.000 m
+
+confusion (rows: staged condition; cols: classifier word)
+                               none    pallet_absent   pallet_rotated   pallet_shifted   pocket_blocked stringer_in_path
+clean                            60               30                0                0                0                0
+pallet_absent                     0               90                0                0                0                0
+pallet_rotated                    0               30               60                0                0                0
+pallet_shifted                   60               30                0                0                0                0
+pocket_blocked                    0               84                0                0                6                0
+stringer_in_path                 60               30                0                0                0                0
+
+clean live cycles (dock_bench.py record --from-staging):
+  cycle 0 plugin success=True error=0 truth= m | classified 997 aborts 934 false-abort 0.937 | reasons {'pallet_absent': 699, 'pallet_rotated': 234, 'none': 63, 'stringer_in_path': 1}
+  cycle 1 plugin success=True error=0 truth= m | classified 76 aborts 14 false-abort 0.184 | reasons {'none': 62, 'pallet_absent': 13, 'stringer_in_path': 1}
+  overall classified 1073 aborts 948 false-abort 0.884
+
+classify latency s: median 0.073 max 0.959 n 1613

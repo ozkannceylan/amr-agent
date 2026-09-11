@@ -22,3 +22,19 @@ zemine 0.426 m artık rms ile oturuyordu - yani "intercept" hiçbir
 zaman bir mesafe değildi. Yanlış modele eşik takmak düzeltme değildir.
 Üçüncüsü: türetilmiş ROI kullanan bir sınıflandırıcı ROI'sini LOGLAMAK
 zorunda - yoksa "pallet_absent" ile "segmentasyon kaçırdı" ayrılamaz.
+
+## 2026-09-12 - en buyuk blob palet degildir
+M8 C1 ilk saha kosusunda staging'de 0/30 verdi. Sebep esikte degildi:
+zemin uzerinde duran EN BUYUK bilesen bir DUVAR idi (0.807 x 1.356 m,
+2.64 m'de), palet ise karenin %2.9'u. "En buyugu al, sonra kapilardan
+gecir" sirasi, kapilarin hepsi dogru olmasina ragmen dogru nesneyi hic
+denemedi. Ders: aday secimini kapilardan ONCE yapma - tum adaylari
+sirala, her birini tam kapi setinden gecir, ilk gecen kazansin.
+Ikincisi, olcerek ogrenildi: 1.0 m'de aracin KENDI CATALLARI palet ile
+menzil olarak SUREKLI (komsu hucre adimi p99 0.055 m, birlesme
+noktasinda adim YOK), yani derinlik-farkindali baglanti da ayiramaz.
+Cozum bir esik degil, bir self-mask (mast/catal joint state) - ve o
+m8_core'da yok. Yanlis poz uretmek yerine REDDETMEK birakildi.
+Ucuncusu: "observed 0/30" bir teshis degildir. Her reddedisin ADI
+olmali (`_refuse()` + trace) ve bench o adi loglamali; aksi halde
+"palet yok" ile "segmentasyon kacirdi" ayni cumle olur.

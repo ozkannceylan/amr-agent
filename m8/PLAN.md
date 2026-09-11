@@ -61,18 +61,23 @@ need the m5-ver3 plant. Still open, in PLAN order:
       their bars with the cause named (the plane C1/C2 fit is the floor);
       H1 stays open on that finding, not on a missing run.
 - [ ] A1 plant, E4 + E5: still `NOT_RUN`
-- [~] C1/C2 classical rework, with E1/E3 as the baseline. CLASSICAL
+- [x] C1/C2 classical rework, with E1/E3 as the baseline. CLASSICAL
       option taken, Phase F NOT opened (owner GO 2026-09-11, branch
       `m8/c1c2-plane-roi-fix`). `m8_core/pocket.py` and `abort.py`
       rewritten: inverse-depth plane model, per-frame ROI derived from
-      the floor, pallet-sized gate in metres, validated pocket pair,
-      yaw about the floor normal. Measured OFFLINE only —
-      `EVIDENCE_M8_C1C2_FIX.md`, session `scene-20260911-200542`: C1
-      145/150 observed, rms 2-D 0.0092 m vs the 0.0706 m bar, 0 over
-      it; C2 210/210 reason-exact, 0 false aborts on 30 clean frames.
-      OPEN: the plant re-run of E1 and E3 from this branch. Until that
-      runs the bars are unanswered on the rig.
-- [ ] B abort live (gate accepts `DOCK_ABORT` only)
+      the floor inside a range window, pallet-sized gate in metres,
+      validated pocket pair, yaw about the floor normal, fork-path test
+      read off the floor model. RE-RUN ON THE PLANT 2026-09-12
+      (`EVIDENCE_M8_C1C2_FIX.md`, sessions `e1-20260912-000726` and
+      `e3-20260912-000826`): E1 staging 30/30 at map-chain rms 0.0564 m,
+      BAR MET on the bar's own chain and pose; 1.5 m 30/30 at 0.0079 m
+      camera-frame; 1.0 m 0/30, refused because the truck's own forks
+      are continuous with the pallet there. E3 clean static false-abort
+      90/90 -> 0/30 at staging and 0/30 at 1.5 m; live-dock false-abort
+      1.000 -> 0.884.
+- [ ] B abort live (gate accepts `DOCK_ABORT` only) - **HOLD**: the
+      live-dock false-abort rate is 0.884 (E3 2026-09-12). A gate
+      cannot stand on that.
 - [ ] C refine live (delta box fixed from E1 — E1 as run yields NO usable box; C waits on the rework above)
 - [ ] D `state.information` to fleet / M7; isolation tests stay green
 - [ ] E R5 speed arbiter (`m8_core/arbiter.py` is not in A0)

@@ -316,14 +316,33 @@ new `bench/results/` session folders only. All four held.
       bar, yaw rms 0.0008 rad; C2 210/210 reason-exact, 0 false aborts.
       `e1_pocket.py` / `e3_abort.py` log the derived ROI and read
       `face_yaw`; NOT_RUN contract kept.
-- [ ] 6. **PLANT RE-RUN of E1 and E3 from this branch.** Not done. It
-      is the only thing that answers the bars. New result folders.
+- [x] 6. Range window + tag-seeded ROI (C1) and a fork-path test read
+      off the FLOOR MODEL instead of a plane intercept (C2). Suite
+      109 -> 121.
+- [x] 7. **PLANT RE-RUN of E1 and E3**, 2026-09-12, this rig, sessions
+      `e1-20260912-000726` and `e3-20260912-000826`. E1: staging 30/30
+      at map-chain rms 0.0564 m - BAR MET (0.0706 m, the bar's own
+      chain and pose); 1.5 m 30/30 at 0.0079 m camera-frame; 1.0 m
+      0/30 refused. E3: clean static false-abort 90/90 -> 0/30 at
+      staging and 0/30 at 1.5 m; live-dock false-abort 1.000 -> 0.884.
+      Two plant findings named by the code, not guessed: at staging the
+      largest standing object was a WALL (multi-candidate search fixed
+      it), and at 1.0 m the truck's own forks are continuous with the
+      pallet with no range step (left refusing - a wrong pose in the
+      last metre is worse than none).
+- [ ] 8. OPEN, in the order the numbers argue for: wire the tag target
+      into the shadow nodes; decide what C1 does in the last metre;
+      explain `pocket_blocked`'s word (84/90 say `pallet_absent`) and
+      the live-cycle frame counts (997 vs 76). PHASE B STAYS ON HOLD.
+      E4/E5 NOT_RUN.
 
 ## Review
-Suite 79 -> 109, `python -m pytest m8/tests`, no ROS on the machine.
-Evidence: `m8/EVIDENCE_M8_C1C2_FIX.md`. Baseline files E1/E3 carry a
-one-line forward pointer and are otherwise untouched; no result folder
-was overwritten. Open items are listed by name in the evidence file:
-plant NOT_RUN, 5/50 refusals at 1.0 m with +-0.10 rad of yaw (refusals,
-not wrong poses), `pallet_shifted` is gross without a `target_u`, a
-loaded pallet is untested.
+Suite 79 -> 121, `python -m pytest m8/tests`, no ROS on the machine.
+E1 and E3 RE-RUN on the plant. Evidence:
+`m8/EVIDENCE_M8_C1C2_FIX.md` ("On the plant"). Baseline files E1/E3
+carry a forward pointer and are otherwise untouched; no existing result
+folder was overwritten. Ten open items are named in the evidence file -
+the load-bearing ones are that C1 sees nothing at 1.0 m on the plant,
+that Phase B cannot open on a 0.884 live false-abort, and that
+`pocket_blocked`'s word and the live-cycle frame counts have numbers
+but no explanation.
