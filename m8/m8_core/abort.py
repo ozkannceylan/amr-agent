@@ -23,11 +23,14 @@ argued from the pallet, not fitted to a corpus:
     0.15 rad is that limit with margin for the pose error itself.
   * SHIFTED_LATERAL_M - past the pallet's own half width the forks
     miss it. See the caution on `target_u` below.
-  * STRINGER_NEAR_M - the pocket mouth is 0.122 m tall; 0.04 m of
-    something nearer than the face is inside the fork path. It is
-    measured over the whole standing object (`near_face_fraction`),
-    because a bar in front of the face projects BELOW the face rows -
-    at 1.0 m it misses them completely.
+  * STRINGER_NEAR_M - 0.04 m of ground between an obstruction and the
+    face is an obstruction in the fork path. It is read off the FLOOR
+    MODEL by `pocket.fork_path_fraction`: height above the floor plane
+    picks the band a fork travels through, horizontal distance along
+    the floor decides what is in front of what. No intercept is read,
+    which is the whole of A1's mistake, and the region searched is the
+    whole standing object - a bar in front of the face projects BELOW
+    the face rows and at 1.0 m misses them completely.
 """
 from __future__ import annotations
 
@@ -43,7 +46,7 @@ from .pocket import (
     DepthFrame,
     face_yaw,
     find_pocket_pair,
-    near_face_fraction,
+    fork_path_fraction,
     segment,
 )
 
@@ -64,18 +67,22 @@ SHIFTED_LATERAL_M = 0.70
 
 
 def classify(frame: DepthFrame,
-             target_u: Optional[float] = None) -> Optional[str]:
+             target_u: Optional[float] = None,
+             target_v: Optional[float] = None,
+             expected_range: Optional[float] = None) -> Optional[str]:
     """Return an ABORT_REASONS member, or None if the frame looks clean.
 
-    `target_u` is the column the tag-derived dock target projects to. It
-    is not ground truth and it is not required; without it the lateral
-    test is the gross one described above.
+    The `target_*` and `expected_range` arguments are the live tag's
+    reading if the caller has one. None of them is ground truth and
+    none is required - a tagless frame is classified on the range
+    window and the floor model alone.
     """
     valid = frame.valid_count()
     if valid < ABSENT_VALID_FRAC * frame.width * frame.height:
         return "pallet_absent"
 
-    seg = segment(frame)
+    seg = segment(frame, expected_range=expected_range,
+                  tag_u=target_u, tag_v=target_v)
     if seg is None:
         # No pallet-sized surface stands above the dominant plane. On a
         # frame that is all floor the fallback candidate IS the floor,
@@ -85,7 +92,7 @@ def classify(frame: DepthFrame,
     if abs(face_yaw(seg.face, seg.up)) > ROTATED_ABS_RAD:
         return "pallet_rotated"
 
-    if near_face_fraction(frame, seg, STRINGER_NEAR_M) > STRINGER_NEAR_FRAC:
+    if fork_path_fraction(frame, seg, STRINGER_NEAR_M) > STRINGER_NEAR_FRAC:
         return "stringer_in_path"
 
     pair = find_pocket_pair(frame, seg)
@@ -106,8 +113,11 @@ def classify(frame: DepthFrame,
 def propose(frame: DepthFrame,
             ttl_ms: int = DEFAULT_TTL_MS,
             confidence: float = 0.8,
-            target_u: Optional[float] = None) -> Optional[object]:
-    reason = classify(frame, target_u=target_u)
+            target_u: Optional[float] = None,
+            target_v: Optional[float] = None,
+            expected_range: Optional[float] = None) -> Optional[object]:
+    reason = classify(frame, target_u=target_u, target_v=target_v,
+                      expected_range=expected_range)
     if reason is None:
         return None
     return make_proposal(

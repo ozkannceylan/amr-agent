@@ -105,6 +105,29 @@ FACE_MIN_DZ_DY = -0.5
 POCKET_MIN_DEPTH_M = 0.04
 MIN_POCKET_COLS = 3
 
+# --- the range window ----------------------------------------------------
+# A dock approach happens inside a known envelope of HORIZONTAL distance
+# from the camera: staging is 2.245 m and the refine regime is the last
+# two metres. Anything outside it is not the pallet this dock is about,
+# and it is excluded before any fit sees it. These are mission geometry
+# and camera geometry. THEY ARE NOT DERIVED FROM BENCH TRUTH - the bench
+# knows where the pallet is and this module must never be told.
+DOCK_ENVELOPE_M = (0.40, 3.20)
+# A live AprilTag gives an expected range. When the caller passes one the
+# window tightens to this much either side of it. Tagless docking gets
+# the envelope above and nothing else (R1: tagged pallets first).
+TAG_WINDOW_M = 0.40
+# EVIDENCE_M8_E1 measured the failure regime: the face was 2.9-6.6 % of
+# the points A1 fitted. The face must be a large share of what is left
+# inside the window after the deck cut, an order clear of that band.
+FACE_INLIER_FRAC_MIN = 0.35
+# Heights above the floor a fork travels through. The pocket mouth is
+# 0.122 m tall. The upper bound is also capped at the segmentation's own
+# deck-cut height: the deck top of a EUR pallet sits at 0.144 m, inside
+# any band generous enough for a fork, and the deck is most of the blob -
+# left in, it buries the fraction (0.035 where the obstruction was 20 %).
+FORK_BAND_M = (0.02, 0.20)
+
 MIN_INV_DEPTH = 1e-6
 
 
@@ -208,6 +231,11 @@ class FaceSegment:
     # Height above the floor at which the deck was cut away, or None
     # when the frame has no floor to measure heights against.
     height_cut: Optional[float] = None
+    # Share of the windowed, deck-cut candidates that the face plane
+    # holds. E1's failure regime was 2.9-6.6 %.
+    inlier_frac: float = 0.0
+    # The horizontal-distance window this segmentation was allowed.
+    window: Tuple[float, float] = DOCK_ENVELOPE_M
 
     def centre_px(self) -> Tuple[float, float]:
         return (0.5 * (self.u0 + self.u1), 0.5 * (self.v0 + self.v1))
@@ -235,6 +263,9 @@ class PocketObservation:
     face_height_m: float = 0.0
     pocket_span_m: float = 0.0
     floor_found: bool = False
+    inlier_frac: float = 0.0
+    window_lo: float = 0.0
+    window_hi: float = 0.0
 
 
 # --------------------------------------------------------------- linear
@@ -363,9 +394,42 @@ def dominant_plane(frame: DepthFrame) -> Optional[Plane]:
     return plane
 
 
-def _blob_bbox(frame: DepthFrame, floor: Plane, stride: int
+def range_window(expected_range: Optional[float] = None
+                 ) -> Tuple[float, float]:
+    """(lo, hi) horizontal distance a pallet is allowed to be at.
+
+    `expected_range` is HORIZONTAL distance along the floor, not optical
+    depth - the two differ by 1/cos(mount pitch), about 15 % on this rig,
+    and quietly feeding one where the other is meant is the kind of thing
+    that reads fine until it does not. A caller holding a tag POSE should
+    convert before calling.
+
+    With no `expected_range` this is the dock envelope and nothing else -
+    that is the tagless case. With one, from a live tag, it tightens
+    around it, and it is clamped to the envelope either way: a tag can
+    narrow this window and can never widen it. Never from ground truth:
+    `bench/plant.py` knows where the pallet is and must not tell this
+    module.
+    """
+    lo, hi = DOCK_ENVELOPE_M
+    if expected_range is None:
+        return lo, hi
+    return (max(lo, float(expected_range) - TAG_WINDOW_M),
+            min(hi, float(expected_range) + TAG_WINDOW_M))
+
+
+def _blob_bbox(frame: DepthFrame, floor: Plane, stride: int,
+               fwd: Tuple[float, float, float],
+               window: Tuple[float, float],
+               seed_px: Optional[Tuple[float, float]] = None
                ) -> Optional[Tuple[int, int, int, int]]:
-    """Bounding box of the largest thing standing above the floor plane."""
+    """Bounding box of the thing standing above the floor, in the window.
+
+    `seed_px` is where a live tag says the target is. It is applied LAST
+    and only to choose between components - it never widens the window
+    and never rescues a frame that had no component to choose from.
+    """
+    lo, hi = window
     cells: Dict[Tuple[int, int], Tuple[int, int]] = {}
     for v in range(0, frame.height, stride):
         y = frame.y_of(v)
@@ -373,7 +437,11 @@ def _blob_bbox(frame: DepthFrame, floor: Plane, stride: int
             z = frame.at(u, v)
             if z is None:
                 continue
-            pz = floor.depth_at(frame.x_of(u), y)
+            x = frame.x_of(u)
+            d_h = z * (x * fwd[0] + y * fwd[1] + fwd[2])
+            if d_h < lo or d_h > hi:
+                continue
+            pz = floor.depth_at(x, y)
             if pz is None:
                 continue
             if pz - z > OBJECT_CLEARANCE_M:
@@ -381,7 +449,7 @@ def _blob_bbox(frame: DepthFrame, floor: Plane, stride: int
     if len(cells) < MIN_BLOB_CELLS:
         return None
     seen = set()
-    best: List[Tuple[int, int]] = []
+    comps: List[List[Tuple[int, int]]] = []
     for start in cells:
         if start in seen:
             continue
@@ -395,10 +463,23 @@ def _blob_bbox(frame: DepthFrame, floor: Plane, stride: int
                     seen.add(nb)
                     comp.append(nb)
                     stack.append(nb)
-        if len(comp) > len(best):
-            best = comp
-    if len(best) < MIN_BLOB_CELLS:
+        comps.append(comp)
+    comps = [c for c in comps if len(c) >= MIN_BLOB_CELLS]
+    if not comps:
         return None
+    best = max(comps, key=len)
+    if seed_px is not None:
+        key = (int(seed_px[0]) // stride, int(seed_px[1]) // stride)
+        holding = [c for c in comps if key in c]
+        if holding:
+            best = max(holding, key=len)
+        else:
+            def gap(comp):
+                us_ = [cells[c][0] for c in comp]
+                vs_ = [cells[c][1] for c in comp]
+                return math.hypot(sum(us_) / len(us_) - seed_px[0],
+                                  sum(vs_) / len(vs_) - seed_px[1])
+            best = min(comps, key=gap)
     us = [cells[c][0] for c in best]
     vs = [cells[c][1] for c in best]
     # One stride of slack each way: the coarse grid clips the edges.
@@ -437,18 +518,26 @@ def _perp_residual(plane: Plane, x: float, y: float, z: float,
 
 def _fit_face(frame: DepthFrame, floor: Optional[Plane],
               bbox: Tuple[int, int, int, int], stride: int,
-              up: Tuple[float, float, float]
+              up: Tuple[float, float, float],
+              window: Tuple[float, float]
               ) -> Optional[Tuple[Plane, int, Tuple[int, int, int, int],
-                                  Optional[float]]]:
+                                  Optional[float], float]]:
     """Fit the pallet face inside bbox and return its own pixel box.
 
-    Seeded on horizontal distance (the face is one value, the deck top
-    is a 0.8 m ramp behind it), then trimmed on perpendicular distance.
-    An unseeded least-squares pass lands on the deck: it has 2.4x the
-    pixels at staging and the two surfaces touch, so nothing that trims
-    on depth alone can walk off it.
+    Three gates, in order. The RANGE WINDOW drops everything outside the
+    dock envelope before a fit exists. The DECK CUT drops the top of the
+    object. What is left is seeded on horizontal distance (the face is
+    one value, the deck top is a 0.8 m ramp behind it) and trimmed on
+    perpendicular distance; an unseeded least-squares pass lands on the
+    deck, which has 2.4x the pixels at staging and touches the face, so
+    nothing that trims on depth alone can walk off it.
+
+    Returns the inlier FRACTION as well as the count: E1 measured the
+    failure regime as the face being 2.9-6.6 % of what was fitted, and a
+    count alone cannot tell that apart from a big frame.
     """
     u0, u1, v0, v1 = bbox
+    lo, hi = window
     fwd = _horizontal_forward(up)
     floor_norm = 0.0
     if floor is not None:
@@ -462,6 +551,9 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
             if z is None:
                 continue
             x = frame.x_of(u)
+            d_h = z * (x * fwd[0] + y * fwd[1] + fwd[2])
+            if d_h < lo or d_h > hi:
+                continue
             height = 0.0
             if floor is not None:
                 pz = floor.depth_at(x, y)
@@ -471,8 +563,7 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
                 if r is None:
                     continue
                 height = -r
-            raw.append((x, y, z, u, v,
-                        z * (x * fwd[0] + y * fwd[1] + fwd[2]), height))
+            raw.append((x, y, z, u, v, d_h, height))
     if len(raw) < MIN_FACE_POINTS:
         return None
     height_cut = None
@@ -483,6 +574,7 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
         if len(under) >= MIN_FACE_POINTS:
             raw = under
             height_cut = top
+    candidates = len(raw)
     counts: Dict[int, int] = {}
     for p in raw:
         key = int(math.floor(p[5] / FACE_SEED_BIN_M))
@@ -512,10 +604,13 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
         inliers = kept
     if len(inliers) < MIN_FACE_POINTS:
         return None
+    frac = len(inliers) / float(candidates)
+    if frac < FACE_INLIER_FRAC_MIN:
+        return None
     us = [p[3] for p in inliers]
     vs = [p[4] for p in inliers]
     box = (min(us), max(us) + 1, min(vs), max(vs) + 1)
-    return plane, len(inliers), box, height_cut
+    return plane, len(inliers), box, height_cut, frac
 
 
 def _world_up(floor: Optional[Plane]) -> Tuple[float, float, float]:
@@ -560,37 +655,62 @@ def face_yaw(face: Plane, up: Tuple[float, float, float]) -> float:
     return -math.atan2(dot(n_face, right), dot(n_face, forward))
 
 
-def segment(frame: DepthFrame) -> Optional[FaceSegment]:
+def segment(frame: DepthFrame,
+            expected_range: Optional[float] = None,
+            tag_u: Optional[float] = None,
+            tag_v: Optional[float] = None) -> Optional[FaceSegment]:
     """Derive the pallet-face ROI for this frame, or refuse.
 
-    Every exit is a named reason the caller can act on: no dominant
-    plane, nothing standing above it that is big enough, no near surface
-    inside the blob, a surface that falls away like a floor, a surface
-    that is not pallet-sized in metres.
+    ORDER MATTERS and it is the order of the brief. The range window
+    comes first and is the only gate a tagless dock gets. The floor
+    model comes next. The tag, if there is one, comes LAST and only
+    chooses between candidate blobs - it cannot widen the window, it
+    cannot invent a face, and `expected_range` is a tag reading, never
+    a ground-truth range.
+
+    Every exit is a named refusal the caller can act on: no dominant
+    plane; nothing standing above it inside the window; no near surface
+    in the blob; a face that is too small a share of what was fitted
+    (E1's failure regime was 2.9-6.6 %); a surface that falls away
+    downward like a floor; a surface that is not pallet-sized in metres.
+    Refusing is the correct output - E1's 0.92 m pose came from a
+    pipeline with none of these.
     """
     if frame.width <= 0 or frame.height <= 0:
         return None
     coarse, fine = _strides(frame)
+    window = range_window(expected_range)
     floor = dominant_plane(frame)
     if floor is None:
         return None
-    bbox = _blob_bbox(frame, floor, coarse)
-    if bbox is None:
-        # Nothing stands above the dominant plane: the dominant plane is
-        # the only surface in view, so it is the candidate face and the
-        # ROI is the frame. `up` is then unknown - see _world_up.
-        floor = None
-        bbox = (0, frame.width, 0, frame.height)
+    seed_px = None
+    if tag_u is not None and tag_v is not None:
+        seed_px = (float(tag_u), float(tag_v))
     up = _world_up(floor)
-    fitted = _fit_face(frame, floor, bbox, fine, up)
+    bbox = _blob_bbox(frame, floor, coarse, _horizontal_forward(up), window,
+                      seed_px)
+    if bbox is None:
+        # Nothing stands above the dominant plane inside the window: the
+        # dominant plane is the only surface in view, so it is the
+        # candidate face and the ROI is the frame. `up` is then unknown -
+        # see _world_up - and the sign test on b below is what rejects a
+        # floor that reached here.
+        floor = None
+        up = _world_up(None)
+        bbox = (0, frame.width, 0, frame.height)
+    fitted = _fit_face(frame, floor, bbox, fine, up, window)
     if fitted is None:
         return None
-    face, n_inliers, box, height_cut = fitted
+    face, n_inliers, box, height_cut, frac = fitted
     u0, u1, v0, v1 = box
     x_c, y_c = frame.x_of(0.5 * (u0 + u1)), frame.y_of(0.5 * (v0 + v1))
     z_c = face.depth_at(x_c, y_c)
     if z_c is None or z_c <= 0.0:
         return None
+    # The sign test on b. `b` is dz/dy: on a floor the depth FALLS as the
+    # image goes down (-3.8 on this rig), on a face standing on that
+    # floor it rises (+0.7...+1.5). The tolerance below zero is for a
+    # level camera, where a face reads exactly 0.
     dz_dy = face.dz_dy(x_c, y_c)
     if dz_dy is None or dz_dy < FACE_MIN_DZ_DY:
         return None
@@ -603,7 +723,8 @@ def segment(frame: DepthFrame) -> Optional[FaceSegment]:
     return FaceSegment(face=face, floor=floor, u0=u0, u1=u1, v0=v0, v1=v1,
                        inliers=n_inliers, width_m=width_m,
                        height_m=height_m, up=up, blob=bbox,
-                       height_cut=height_cut)
+                       height_cut=height_cut, inlier_frac=frac,
+                       window=window)
 
 
 # ------------------------------------------------------------- the pockets
@@ -671,25 +792,43 @@ def find_pocket_pair(frame: DepthFrame, seg: FaceSegment
     return u_mid, float(_median(vs)), span_m
 
 
-def near_face_fraction(frame: DepthFrame, seg: FaceSegment,
+def fork_path_fraction(frame: DepthFrame, seg: FaceSegment,
                        nearer_by: float) -> float:
-    """Share of the standing object that sits in front of its own face.
+    """Share of the FORK BAND that is obstructed, read off the floor model.
 
-    Measured over the WHOLE blob, not the face box, because something
-    in the fork path is nearer than the face and so projects below it.
-    The floor is excluded by the same clearance test the blob used, and
-    the deck by the same height cut the face fit used - otherwise the
-    deck, which is most of the blob, would bury the fraction.
+    This is the test `EVIDENCE_M8_E3.md` caught A1 getting wrong. A1
+    compared column depths with `c`, the intercept of a plane fitted to
+    a fixed band - which was the floor - so "nearer than the face" meant
+    "nearer than the floor's own average" and fired on range, not on
+    obstruction. Nothing here reads an intercept.
+
+    Every quantity is in the floor's own model:
+      * HEIGHT above the floor plane, so the band a fork travels through
+        (FORK_BAND_M) can be named in metres. The floor itself is below
+        the band and the deck top is above it, so neither can vote.
+      * HORIZONTAL DISTANCE along the floor, so "in front of the face"
+        is a distance on the ground and not a depth along a ray. A bar
+        in front of the face projects BELOW the face in the image - at
+        1.0 m it leaves the face box entirely - which is why the region
+        searched is the whole blob.
+
+    Without a floor plane there is no model to read and the answer is
+    0.0: C2 must not invent an obstruction out of a frame it cannot
+    measure heights in.
     """
+    if seg.floor is None:
+        return 0.0
     u0, u1, v0, v1 = seg.blob
     if u1 <= u0 or v1 <= v0:
         u0, u1, v0, v1 = seg.u0, seg.u1, seg.v0, seg.v1
     _coarse, stride = _strides(frame)
-    floor_norm = 0.0
-    if seg.floor is not None:
-        floor_norm = math.sqrt(seg.floor.alpha ** 2 + seg.floor.beta ** 2
-                               + seg.floor.gamma ** 2)
-    near = 0
+    fwd = _horizontal_forward(seg.up)
+    floor_norm = math.sqrt(seg.floor.alpha ** 2 + seg.floor.beta ** 2
+                           + seg.floor.gamma ** 2)
+    lo, hi = FORK_BAND_M
+    if seg.height_cut is not None:
+        hi = min(hi, seg.height_cut)
+    blocked = 0
     total = 0
     for v in range(v0, v1, stride):
         y = frame.y_of(v)
@@ -698,33 +837,43 @@ def near_face_fraction(frame: DepthFrame, seg: FaceSegment,
             if z is None:
                 continue
             x = frame.x_of(u)
-            if seg.floor is not None:
-                pz = seg.floor.depth_at(x, y)
-                if pz is None or pz - z <= OBJECT_CLEARANCE_M:
-                    continue
-                if seg.height_cut is not None:
-                    r = _perp_residual(seg.floor, x, y, z, floor_norm)
-                    if r is None or -r > seg.height_cut:
-                        continue
-            fz = seg.face.depth_at(x, y)
-            if fz is None:
+            # Stand on the floor first. Depth noise puts a few
+            # millimetres of scatter on every floor pixel, so a height
+            # band alone lets the floor itself into the denominator and
+            # the fraction stops meaning anything.
+            pz = seg.floor.depth_at(x, y)
+            if pz is None or pz - z <= OBJECT_CLEARANCE_M:
                 continue
+            r = _perp_residual(seg.floor, x, y, z, floor_norm)
+            if r is None:
+                continue
+            height = -r
+            if height < lo or height > hi:
+                continue
+            d_h = z * (x * fwd[0] + y * fwd[1] + fwd[2])
+            face_z = seg.face.depth_at(x, y)
+            if face_z is None:
+                continue
+            face_d = face_z * (x * fwd[0] + y * fwd[1] + fwd[2])
             total += 1
-            if z < fz - nearer_by:
-                near += 1
+            if d_h < face_d - nearer_by:
+                blocked += 1
     if total == 0:
         return 0.0
-    return near / float(total)
+    return blocked / float(total)
 
 
-def fit_face_plane(frame: DepthFrame) -> Optional[Tuple[float, float, float, int]]:
+def fit_face_plane(frame: DepthFrame,
+                   expected_range: Optional[float] = None
+                   ) -> Optional[Tuple[float, float, float, int]]:
     """(dz/dx, dz/dy, depth) of the FACE plane on the optical axis, and n.
 
     The tuple shape is A1's so the benches keep reading the same three
     columns; what changed is that the plane is the pallet face found in
-    a derived ROI instead of whatever filled a fixed central band.
+    a derived ROI inside the range window, instead of whatever filled a
+    fixed central band.
     """
-    seg = segment(frame)
+    seg = segment(frame, expected_range=expected_range)
     if seg is None:
         return None
     a = seg.face.dz_dx(0.0, 0.0)
@@ -735,8 +884,18 @@ def fit_face_plane(frame: DepthFrame) -> Optional[Tuple[float, float, float, int
     return a, b, c, seg.inliers
 
 
-def observe(frame: DepthFrame) -> Optional[PocketObservation]:
-    seg = segment(frame)
+def observe(frame: DepthFrame,
+            expected_range: Optional[float] = None,
+            tag_u: Optional[float] = None,
+            tag_v: Optional[float] = None) -> Optional[PocketObservation]:
+    """The pocket-pair point, or None.
+
+    `expected_range`, `tag_u` and `tag_v` are the live tag's reading if
+    the caller has one. All three are optional and all three are only
+    ever narrowing: tagless docking runs on the range window alone.
+    """
+    seg = segment(frame, expected_range=expected_range,
+                  tag_u=tag_u, tag_v=tag_v)
     if seg is None:
         return None
     pair = find_pocket_pair(frame, seg)
@@ -756,21 +915,32 @@ def observe(frame: DepthFrame) -> Optional[PocketObservation]:
         face_yaw=face_yaw(seg.face, seg.up),
         roi_u0=seg.u0, roi_u1=seg.u1, roi_v0=seg.v0, roi_v1=seg.v1,
         face_width_m=seg.width_m, face_height_m=seg.height_m,
-        pocket_span_m=span_m, floor_found=seg.floor is not None)
+        pocket_span_m=span_m, floor_found=seg.floor is not None,
+        inlier_frac=seg.inlier_frac, window_lo=seg.window[0],
+        window_hi=seg.window[1])
 
 
 def propose(frame: DepthFrame,
             tag_u: Optional[float] = None,
             tag_v: Optional[float] = None,
             tag_z: Optional[float] = None,
-            ttl_ms: int = DEFAULT_TTL_MS) -> Optional[object]:
+            ttl_ms: int = DEFAULT_TTL_MS,
+            expected_range: Optional[float] = None) -> Optional[object]:
     """Build a DOCK_TARGET_REFINE vs the tag-derived target.
 
     tag_* default to the image centre / fitted face - the shadow
     node's stand-in when no AprilTag pose is latched. That is not
     ground truth and is not a command.
+
+    `tag_z` is the target's optical DEPTH and is what the dx delta is
+    measured against. `expected_range` is HORIZONTAL distance and is
+    what narrows the range window. They are deliberately separate
+    arguments: they are different quantities and passing one as the
+    other is a 15 % error on this rig's mount. (tag_u, tag_v) also
+    choose between candidate blobs, inside `observe`.
     """
-    obs = observe(frame)
+    obs = observe(frame, expected_range=expected_range,
+                  tag_u=tag_u, tag_v=tag_v)
     if obs is None:
         return None
     tu = frame.cx if tag_u is None else float(tag_u)
@@ -793,6 +963,8 @@ def propose(frame: DepthFrame,
         "face_height_m": obs.face_height_m,
         "pocket_span_m": obs.pocket_span_m,
         "floor_found": obs.floor_found,
+        "inlier_frac": obs.inlier_frac,
+        "range_window_m": [obs.window_lo, obs.window_hi],
         "algorithm": "classical_floor_anchored_face",
     }
     return make_proposal(

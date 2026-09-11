@@ -10,6 +10,7 @@ which is why the offline suite was green while `EVIDENCE_M8_E1.md` and
 """
 from functools import lru_cache
 
+from m8_core.pocket import DepthFrame
 from m8_core.scene import make_scene_depth
 
 W, H = 320, 240
@@ -61,3 +62,47 @@ def stringer(distance: float = APPROACH_M):
 def shifted(lateral: float = 0.75, distance: float = APPROACH_M):
     return make_scene_depth(width=W, height=H, face_distance=distance,
                             lateral=lateral)
+
+
+@lru_cache(maxsize=None)
+def far(distance: float = 4.5):
+    """A pallet outside the dock envelope entirely."""
+    return make_scene_depth(width=W, height=H, face_distance=distance,
+                            max_range=8.0)
+
+
+@lru_cache(maxsize=None)
+def two_pallets(distance: float = APPROACH_M):
+    """Two pallets side by side. Returns (frame, left_scene, right_scene).
+
+    Composited by taking the nearer of two renders per pixel, which is
+    what occlusion does. Both renders carry the same floor, so the
+    result is one floor and two separate standing blobs - the frame a
+    tag has to disambiguate.
+    """
+    left, s_left = make_scene_depth(width=W, height=H,
+                                    face_distance=distance, lateral=-0.60)
+    right, s_right = make_scene_depth(width=W, height=H,
+                                      face_distance=distance, lateral=0.80,
+                                      seed=11)
+    merged = []
+    for a, b in zip(left.depths, right.depths):
+        a_ok = a == a and a > 0.0
+        b_ok = b == b and b > 0.0
+        if a_ok and b_ok:
+            merged.append(min(a, b))
+        elif a_ok:
+            merged.append(a)
+        elif b_ok:
+            merged.append(b)
+        else:
+            merged.append(float("nan"))
+    frame = DepthFrame(left.width, left.height, tuple(merged), left.fx,
+                       left.fy, left.cx, left.cy, "two", 1.0)
+    return frame, s_left, s_right
+
+
+def px_of(frame, scene):
+    """Pixel the scene's pocket centre projects to - a tag's reading."""
+    x, y, z = scene.pocket_centre()
+    return frame.cx + x / z * frame.fx, frame.cy + y / z * frame.fy

@@ -10,6 +10,7 @@ import pytest
 import scenes
 
 from m8_core.contract import KIND_DOCK_TARGET_REFINE, validate_proposal
+from m8_core import pocket
 from m8_core.pocket import (
     DepthFrame,
     _least_squares_plane,
@@ -150,3 +151,55 @@ def test_tag_target_shifts_the_delta():
     assert a is not None and b is not None
     assert a.pose_delta().dy != b.pose_delta().dy
     assert math.isfinite(a.pose_delta().hypot_xy())
+
+
+# ------------------------------------------------- the range window (C1)
+def test_the_dock_envelope_alone_refuses_a_pallet_that_is_too_far():
+    """Tagless docking gets the window and nothing else."""
+    frame, _scene = scenes.far(4.5)
+    assert observe(frame) is None
+
+
+def test_a_tag_can_narrow_the_window_and_can_never_widen_it():
+    lo, hi = pocket.DOCK_ENVELOPE_M
+    assert pocket.range_window() == (lo, hi)
+    near = pocket.range_window(1.5)
+    assert lo <= near[0] < near[1] <= hi
+    assert near[1] - near[0] < hi - lo
+    # A tag claiming the pallet is 10 m away cannot reach past the
+    # envelope, so it cannot rescue the frame above either.
+    assert pocket.range_window(10.0)[1] <= hi
+    assert pocket.range_window(0.0)[0] >= lo
+    far_frame, _scene = scenes.far(4.5)
+    assert observe(far_frame, expected_range=4.5) is None
+
+
+def test_a_wrong_expected_range_refuses_rather_than_guessing():
+    frame, scene = scenes.clean(scenes.APPROACH_M)
+    assert observe(frame, expected_range=1.5) is not None
+    # A tag reading a metre out puts the pallet outside the window.
+    assert observe(frame, expected_range=2.6) is None
+    del scene
+
+
+def test_the_tag_pixel_chooses_between_two_pallets():
+    frame, left, right = scenes.two_pallets()
+    for scene in (left, right):
+        u, v = scenes.px_of(frame, scene)
+        obs = observe(frame, tag_u=u, tag_v=v)
+        assert obs is not None
+        lat = (obs.pocket_u - frame.cx) / frame.fx * obs.face_z
+        assert lat == pytest.approx(scene.pocket_centre()[0], abs=0.05)
+    # Tagless the frame still yields a pallet, just not a chosen one.
+    assert observe(frame) is not None
+
+
+@pytest.mark.parametrize("distance", [scenes.STAGING_M, scenes.APPROACH_M,
+                                      scenes.CLOSE_M])
+def test_the_face_is_a_large_share_of_what_was_fitted(distance):
+    """E1's failure regime was the face being 2.9-6.6 % of the fit."""
+    frame, _scene = scenes.clean(distance)
+    obs = observe(frame)
+    assert obs is not None
+    assert obs.inlier_frac >= pocket.FACE_INLIER_FRAC_MIN
+    assert obs.inlier_frac > 0.20, "back in E1's failure regime"

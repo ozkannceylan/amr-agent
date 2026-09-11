@@ -7,9 +7,19 @@ The first test below is the one that would have caught it offline.
 import pytest
 import scenes
 
-from m8_core.abort import classify, propose
+from m8_core.abort import (
+    STRINGER_NEAR_FRAC,
+    STRINGER_NEAR_M,
+    classify,
+    propose,
+)
 from m8_core.contract import ABORT_REASONS, KIND_DOCK_ABORT
-from m8_core.pocket import DepthFrame
+from m8_core.pocket import (
+    DepthFrame,
+    fork_path_fraction,
+    make_plane_depth,
+    segment,
+)
 
 
 @pytest.mark.parametrize("distance", [scenes.STAGING_M, scenes.APPROACH_M,
@@ -91,3 +101,41 @@ def test_proceed_is_never_returned():
             p = propose(frame)
             assert p.kind == KIND_DOCK_ABORT
             assert p.abort_reason() == reason
+
+
+# ------------------------------------------- the fork path is floor-model
+@pytest.mark.parametrize("distance", [scenes.STAGING_M, scenes.APPROACH_M,
+                                      scenes.CLOSE_M])
+def test_the_fork_path_test_reads_the_floor_and_not_an_intercept(distance):
+    """A1 compared column depths with `c`, a plane intercept that was the
+    floor's, so its stringer word fired on RANGE. The floor-model test
+    separates clean from obstructed by a factor of four at every range.
+    """
+    clean_frame, _a = scenes.clean(distance)
+    seg = segment(clean_frame)
+    assert seg is not None
+    assert fork_path_fraction(clean_frame, seg, STRINGER_NEAR_M) == 0.0
+
+    bar_frame, _b = scenes.stringer(distance)
+    bar_seg = segment(bar_frame)
+    assert bar_seg is not None
+    blocked = fork_path_fraction(bar_frame, bar_seg, STRINGER_NEAR_M)
+    assert blocked > 4.0 * STRINGER_NEAR_FRAC
+
+
+def test_a_solid_face_is_blocked_pockets_not_an_obstruction():
+    """The deck top and a filled pocket are not things in the fork path."""
+    frame, _scene = scenes.no_pockets()
+    seg = segment(frame)
+    assert seg is not None
+    assert fork_path_fraction(frame, seg, STRINGER_NEAR_M) == 0.0
+    assert classify(frame) == "pocket_blocked"
+
+
+def test_a_frame_with_no_floor_model_claims_no_obstruction():
+    """Without a floor there is nothing to measure heights against."""
+    frame = make_plane_depth(48, 36, 1.20)
+    seg = segment(frame)
+    if seg is not None:
+        assert seg.floor is None
+        assert fork_path_fraction(frame, seg, STRINGER_NEAR_M) == 0.0
