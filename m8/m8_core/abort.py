@@ -31,6 +31,27 @@ argued from the pallet, not fitted to a corpus:
     which is the whole of A1's mistake, and the region searched is the
     whole standing object - a bar in front of the face projects BELOW
     the face rows and at 1.0 m misses them completely.
+
+THE WORD POLICY, AND WHY IT IS NOT A THRESHOLD. `EVIDENCE_M8_C1C2_FIX.md`
+measured the thresholds above working - every staged fault was aborted
+on, clean static frames read `none` at staging and 1.5 m - and the live
+false-abort rate still 0.884. The thresholds were not what was wrong.
+The WORDS were: "no segmented face" was answered with `pallet_absent`
+whatever the reason, and inside 1.2 m the reason is that the truck's own
+forks are continuous with the pallet. The bay was full every time.
+
+Two rules replace it, and neither moves a number:
+
+  * `pallet_absent` is a claim about the world and needs evidence - a
+    candidate that was measured and found not to be a pallet. See
+    `word_for_refusals` and the three sets below it.
+  * A standing object that runs off the edge of the image is measured on
+    a PART, so it supports no word that claims something about the whole
+    pallet. An obstruction seen inside the visible region is still an
+    obstruction, so `stringer_in_path` survives clipping.
+
+The output of both rules is silence, which is not `proceed`: the node
+publishes nothing and the dock consumer is told nothing at all.
 """
 from __future__ import annotations
 
@@ -43,7 +64,10 @@ from .contract import (
     make_proposal,
 )
 from .pocket import (
+    PALLET_FACE_HEIGHT_M,
+    PALLET_FACE_WIDTH_M,
     DepthFrame,
+    blob_touches_border,
     face_yaw,
     find_pocket_pair,
     fork_path_fraction,
@@ -65,31 +89,176 @@ STRINGER_NEAR_FRAC = 0.06
 # the tag-derived target and should pass it.
 SHIFTED_LATERAL_M = 0.70
 
+# --- WHICH WORD "NO FACE" DESERVES ---------------------------------------
+# `EVIDENCE_M8_C1C2_FIX.md` measured this classifier aborting on 88 % of
+# the frames of two docks `opennav_docking` finished with error 0, and
+# almost all of those aborts were one word: `pallet_absent`, said inside
+# 1.2 m where C1 refuses because the truck's own forks are continuous
+# with the pallet. The bay was not empty. The classifier had no other
+# word and said the wrong one.
+#
+# `pallet_absent` is a CLAIM ABOUT THE WORLD and it needs evidence. The
+# evidence is a candidate that was measured and found not to be a pallet.
+# A refusal that says the frame could not be measured is not evidence of
+# anything, and a refusal that says the pallet may be there and merged
+# with something else is evidence AGAINST the claim.
+#
+# Silence is the correct output when the frame cannot support a word.
+# `proceed` is still not a reason and not a kind: returning None means
+# the node publishes nothing, not that it endorses the dock.
+
+# Measured and not a pallet - the candidate got through the fit and was
+# rejected on its own geometry. This is what an empty bay looks like:
+# the only surface in the window is the floor, or the only things
+# standing in it are the wrong size to be a EUR pallet.
+MEASURED_NOT_A_PALLET = frozenset((
+    "candidate_falls_away_like_a_floor",
+    "face_width_not_pallet_sized",
+    "face_height_not_pallet_sized",
+))
+
+# CLIPPING ONLY UNDERMINES A LOWER BOUND. An object that runs off the
+# image reads NARROWER and SHORTER than it is - never wider, never
+# taller - so "too small to be a pallet" on a clipped candidate is a
+# statement about the framing, while "too wide" or "too tall" is a
+# statement about the object and survives it. `candidate_falls_away_
+# like_a_floor` is a SHAPE test, not a size one, and survives clipping
+# outright: a floor seen through a letterbox is still a floor.
+#
+# This matters and it was measured, not assumed. The truck's own tines
+# start under the camera and run to the bottom edge of every frame, so a
+# rule that discounted any clipped candidate would discount the tines -
+# and with the bay empty the tines are most of what there is to measure.
+SIZE_GATE_LOWER_EDGE = {
+    "face_width_not_pallet_sized": ("width_m", PALLET_FACE_WIDTH_M[0]),
+    "face_height_not_pallet_sized": ("height_m", PALLET_FACE_HEIGHT_M[0]),
+}
+
+# The pallet may be in this frame and the segmentation could not isolate
+# it. `face_is_too_small_a_share` is E1's finding 2 by name: the face IS
+# there, merged with a second surface, and holds 23-25 % of the blob.
+# Saying `pallet_absent` over this refusal is saying the opposite of what
+# the refusal found.
+COULD_STILL_BE_THE_PALLET = frozenset((
+    "face_is_too_small_a_share",
+))
+
+# Everything else `segment` can raise - too_few_points_in_window,
+# too_few_face_inliers, seed_plane_unsolvable,
+# face_plane_behind_the_camera, no_dominant_plane, empty_frame - says
+# only that there was too little to measure. It neither supports the
+# claim nor blocks it, and it is deliberately not listed: a refusal name
+# added to `pocket` later defaults to saying nothing, which is the safe
+# default for a word policy.
+
+
+def word_for_refusals(frame: DepthFrame, trace: dict) -> Optional[str]:
+    """The word a frame with no segmented face deserves - usually none.
+
+    `trace["refusals"]` is every candidate `segment` tried and the gate
+    that stopped each one. The rule, in the order it is applied:
+
+      1. If ANY candidate could still be the pallet, say nothing. One
+         merged fork-and-pallet blob is enough to make `pallet_absent`
+         false, whatever the other seven candidates were.
+      2. A candidate that was measured and is not pallet-sized is
+         evidence of an empty bay - UNLESS the reading that rejected it
+         was a LOWER bound taken on an object that ran off the image,
+         because a clipped object reads narrower and shorter than it is.
+         "Too wide", "too tall" and "this is a floor" all survive
+         clipping. The floor fallback is not a clipped object: it is the
+         whole frame by construction, and it is the purest empty-bay
+         evidence there is.
+      3. With no evidence either way, say nothing.
+
+    Frame-level refusals (`no_dominant_plane`, `empty_frame`) leave the
+    list empty and therefore return None, which is right: a frame with
+    no floor model supports no claim about what is standing on it.
+    """
+    evidence = False
+    for item in trace.get("refusals") or ():
+        why = item.get("why")
+        if why in COULD_STILL_BE_THE_PALLET:
+            return None
+        if why not in MEASURED_NOT_A_PALLET:
+            continue
+        if _clipping_explains_it(frame, item):
+            continue
+        evidence = True
+    return "pallet_absent" if evidence else None
+
+
+def _clipping_explains_it(frame: DepthFrame, item: dict) -> bool:
+    """Was this candidate rejected for reading smaller than it is."""
+    gate = SIZE_GATE_LOWER_EDGE.get(item.get("why"))
+    if gate is None:
+        return False
+    key, low_edge = gate
+    measured = item.get(key)
+    if measured is None or measured >= low_edge:
+        return False                     # it was too BIG, which clipping
+        # cannot cause, or the fit never reported a size at all
+    bbox = item.get("blob")
+    return bool(item.get("standing") and bbox is not None
+                and blob_touches_border(frame, bbox))
+
 
 def classify(frame: DepthFrame,
              target_u: Optional[float] = None,
              target_v: Optional[float] = None,
-             expected_range: Optional[float] = None) -> Optional[str]:
+             expected_range: Optional[float] = None,
+             self_mask=None,
+             target_lateral_m: Optional[float] = None) -> Optional[str]:
     """Return an ABORT_REASONS member, or None if the frame looks clean.
 
     The `target_*` and `expected_range` arguments are the live tag's
     reading if the caller has one. None of them is ground truth and
     none is required - a tagless frame is classified on the range
     window and the floor model alone.
+
+    NO THRESHOLD BELOW MOVED when the word policy was written. What
+    changed is which words the frame is allowed to support: a refusal
+    is not automatically `pallet_absent` (see `word_for_refusals`), and
+    a segment that runs off the edge of the image cannot support a word
+    about the WHOLE object - its yaw, its pocket pair, its lateral
+    offset are all measured on a part. An obstruction seen inside the
+    visible region is still an obstruction, so `stringer_in_path`
+    survives clipping; every word that is a claim about the whole pallet
+    does not.
     """
+    if self_mask is not None and self_mask.is_stale(frame.sim_stamp):
+        # A SELF-MASK IN THE WRONG PLACE DELETES PART OF THE PALLET. The
+        # mask is placed by `mast_joint`, so a stale joint reading is a
+        # mask of unknown position, and at 1.0 m the tine tips are 25 mm
+        # from the pallet face. A classifier that cannot tell its own
+        # forks from the scene has no word worth publishing, so it
+        # publishes none. Silence is not `proceed`.
+        #
+        # This is reached ONLY when a caller opts into masking. A caller
+        # that passes no mask gets exactly the classifier it got before.
+        return None
+
     valid = frame.valid_count()
     if valid < ABSENT_VALID_FRAC * frame.width * frame.height:
+        # Nothing within range anywhere in the frame - not even a floor.
+        # This is the one reading that is evidence of an empty bay on its
+        # own, and it is also what a blind camera looks like. The word is
+        # kept, and sensor health is m8_health's, not a reason word's.
         return "pallet_absent"
 
+    trace: dict = {}
     seg = segment(frame, expected_range=expected_range,
-                  tag_u=target_u, tag_v=target_v)
+                  tag_u=target_u, tag_v=target_v, trace=trace,
+                  self_mask=self_mask)
     if seg is None:
-        # No pallet-sized surface stands above the dominant plane. On a
-        # frame that is all floor the fallback candidate IS the floor,
-        # and the dz/dy guard in `segment` is what rejects it.
-        return "pallet_absent"
+        return word_for_refusals(frame, trace)
 
-    if abs(face_yaw(seg.face, seg.up)) > ROTATED_ABS_RAD:
+    # A standing object that runs off the image is measured on a part.
+    # The floor fallback (`seg.floor is None`) is the whole frame by
+    # construction and is not a clipped object.
+    clipped = seg.floor is not None and blob_touches_border(frame, seg.blob)
+
+    if not clipped and abs(face_yaw(seg.face, seg.up)) > ROTATED_ABS_RAD:
         return "pallet_rotated"
 
     if fork_path_fraction(frame, seg, STRINGER_NEAR_M) > STRINGER_NEAR_FRAC:
@@ -97,16 +266,32 @@ def classify(frame: DepthFrame,
 
     pair = find_pocket_pair(frame, seg)
     if pair is None:
-        return "pocket_blocked"
+        return None if clipped else "pocket_blocked"
     u_mid, v_mid, _span = pair
 
     z = seg.face.depth_at(frame.x_of(u_mid), frame.y_of(v_mid))
     if z is None:
-        return "pocket_blocked"
-    tu = frame.cx if target_u is None else float(target_u)
-    lateral = (u_mid - tu) / frame.fx * z
+        return None if clipped else "pocket_blocked"
+    if target_lateral_m is None:
+        tu = frame.cx if target_u is None else float(target_u)
+        lateral = (u_mid - tu) / frame.fx * z
+    else:
+        # A REFERENCE COLUMN IS ONLY A REFERENCE AT ONE DEPTH. This rig's
+        # AprilTag is the DOCK MARKER on the bay's back panel, 0.85 m
+        # behind the pallet face, and the camera is mounted 0.40 m off
+        # the vehicle centreline - so the marker and the pallet sit on
+        # one line in the world and project to DIFFERENT columns,
+        # further apart the closer the truck gets (measured on the plant
+        # 2026-09-12: 12 px at staging, 27 at 1.5 m, 57 at 1.0 m).
+        #
+        # In METRES there is no such drift: the tag's own optical X was
+        # -0.4019 / -0.3979 / -0.3994 m at those three poses, which is
+        # the mount offset and nothing else. So a caller that knows the
+        # reference in metres passes it in metres, and the subtraction
+        # happens where the depth is already known.
+        lateral = (u_mid - frame.cx) / frame.fx * z - float(target_lateral_m)
     if abs(lateral) > SHIFTED_LATERAL_M:
-        return "pallet_shifted"
+        return None if clipped else "pallet_shifted"
     return None
 
 
@@ -115,9 +300,12 @@ def propose(frame: DepthFrame,
             confidence: float = 0.8,
             target_u: Optional[float] = None,
             target_v: Optional[float] = None,
-            expected_range: Optional[float] = None) -> Optional[object]:
+            expected_range: Optional[float] = None,
+            self_mask=None,
+            target_lateral_m: Optional[float] = None) -> Optional[object]:
     reason = classify(frame, target_u=target_u, target_v=target_v,
-                      expected_range=expected_range)
+                      expected_range=expected_range, self_mask=self_mask,
+                      target_lateral_m=target_lateral_m)
     if reason is None:
         return None
     return make_proposal(

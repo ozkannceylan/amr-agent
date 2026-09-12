@@ -38,3 +38,38 @@ m8_core'da yok. Yanlis poz uretmek yerine REDDETMEK birakildi.
 Ucuncusu: "observed 0/30" bir teshis degildir. Her reddedisin ADI
 olmali (`_refuse()` + trace) ve bench o adi loglamali; aksi halde
 "palet yok" ile "segmentasyon kacirdi" ayni cumle olur.
+
+## M8 E3 words / self-mask (2026-09-12)
+
+Birincisi, ve en pahalisi: AYNI kareyi IKI kez siniflandirmadan bir
+farki bir degisiklige baglayamazsin. Tag kablolamasi 113 karenin 57'sini
+`none` -> `pallet_absent` yapti; sadece self-mask tasiyan 427 karenin
+SIFIRI bozuldu. Tek tabloda suclu belli oldu. Es-kare (paired)
+olcum olmasaydi "0.884'ten 0.32'ye dustu, iyi" diyip regresyonu icine
+gomerdik.
+
+Ikincisi: BIR REFERANS SUTUNU SADECE BIR DERINLIKTE REFERANSTIR. Bu
+rigde AprilTag paletin uzerinde degil, rafin arka panelinde - paletten
+0.85 m geride. Kamera da merkez hattan 0.40 m kacik oldugu icin ikisi
+dunyada ayni cizgide olmasina ragmen FARKLI piksel sutununa dusuyor:
+stagingde 12 px, 1.5 m'de 27, 1.0 m'de 57. METRE cinsinden ise kayma
+yok (-0.4019 / -0.3979 / -0.3994). Ders: referansi piksel olarak degil,
+METRE olarak tasi ve cikarmayi derinligin bilindigi yerde yap.
+
+Ucuncusu, olcerek ogrenildi: SENSOR KUYRUGUNU BOSALTAN DONGUDEN
+SUBPROCESS CAGIRMA. Palet pozunu `gz model -p` ile spin dongusunun
+icinden okumak cycle 0'i 83 kareden 1 KAREYE dusurdu (5 derinlikli
+derinlik kuyrugu doldu ve dustu). Ayni okuma kendi thread'inde calisinca
+45 kare geldi. Olcum aletinin kendisi olcumu bozabilir.
+
+Dorduncusu: DUNYA DURUMUNU KOSU SIRASINDA OKU, sadece uclarinda degil.
+Dock catallari paletin ICINE suruyor, yani plugin'in "temiz" dedigi bir
+cevrim temiz bir dunya ile BITMIYOR - olculen 0.2372 / 0.0696 / 0.4715 m.
+Uclarda okuyunca butun cevrim sayilamaz hale geliyordu, hicbir seye
+dokunulmadan once alinan yaklasma dahil.
+
+Besincisi: bir esigi degil, KELIMEYI duzelt. C1/C2 duzeltmesinde her
+esik dogru calisiyordu ve canli yanlis-abort hala 0.884'tu. Sorun
+"segmentasyon reddetti" sorusuna tek bir kelimeyle - `pallet_absent` -
+cevap vermekti. Kelime bir DUNYA IDDIASIDIR ve kanit ister; kanit yoksa
+dogru cikti SESSIZLIKTIR (ve sessizlik `proceed` degildir).

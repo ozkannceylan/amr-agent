@@ -240,6 +240,10 @@ class FaceSegment:
     inlier_frac: float = 0.0
     # The horizontal-distance window this segmentation was allowed.
     window: Tuple[float, float] = DOCK_ENVELOPE_M
+    # The vehicle's own forks, if the caller supplied them. Carried on
+    # the segment so the pocket and fork-path tests mask the same volume
+    # the fit did, without the caller having to pass it three times.
+    masked: Optional["_SelfVolume"] = None
 
     def centre_px(self) -> Tuple[float, float]:
         return (0.5 * (self.u0 + self.u1), 0.5 * (self.v0 + self.v1))
@@ -278,12 +282,17 @@ def _median(values: Sequence[float]) -> float:
     return ordered[len(ordered) // 2]
 
 
-def _col_median(frame: DepthFrame, u: int, v0: int, v1: int) -> Optional[float]:
+def _col_median(frame: DepthFrame, u: int, v0: int, v1: int,
+                masked=None) -> Optional[float]:
     vals = []
+    x = frame.x_of(u)
     for v in range(v0, v1):
         z = frame.at(u, v)
-        if z is not None:
-            vals.append(z)
+        if z is None:
+            continue
+        if masked is not None and masked.covers(x, frame.y_of(v), z):
+            continue
+        vals.append(z)
     if len(vals) < 2:
         return None
     return _median(vals)
@@ -425,7 +434,8 @@ def range_window(expected_range: Optional[float] = None
 def _blob_candidates(frame: DepthFrame, floor: Plane, stride: int,
                      fwd: Tuple[float, float, float],
                      window: Tuple[float, float],
-                     seed_px: Optional[Tuple[float, float]] = None
+                     seed_px: Optional[Tuple[float, float]] = None,
+                     masked: Optional[_SelfVolume] = None
                      ) -> List[Tuple[int, int, int, int]]:
     """Bounding boxes of things standing above the floor, in the window.
 
@@ -454,6 +464,12 @@ def _blob_candidates(frame: DepthFrame, floor: Plane, stride: int,
                 continue
             pz = floor.depth_at(x, y)
             if pz is None:
+                continue
+            if masked is not None and masked.covers(x, y, z):
+                # The truck's own forks stand above the floor too, and at
+                # 1.0 m they abut the pallet with no range step at the
+                # junction. Dropping them HERE is what splits the blob;
+                # nothing downstream can split it once it is one.
                 continue
             if pz - z > OBJECT_CLEARANCE_M:
                 cells[(u // stride, v // stride)] = (u, v)
@@ -503,6 +519,70 @@ def _blob_candidates(frame: DepthFrame, floor: Plane, stride: int,
     return boxes
 
 
+class _SelfVolume(object):
+    """`selfmask.SelfMask` bound to one frame's own floor plane.
+
+    The mask is stated in metres - lateral, height above the floor,
+    horizontal distance - and a depth pixel is none of those until a
+    floor plane exists to measure heights against. This binds the two
+    and answers one question: is this pixel the truck itself.
+
+    HEIGHT IS NEVER TAKEN FROM THE MOUNT. A mask that assumed the
+    camera's nominal height would be in the wrong place on a ramp or a
+    settled suspension, and would not say so. It comes from the plane the
+    frame itself supplied, the same one every other test here reads.
+    """
+
+    __slots__ = ("mask", "floor", "fwd", "norm")
+
+    def __init__(self, mask, floor: Optional["Plane"],
+                 up: Tuple[float, float, float]):
+        self.mask = mask
+        self.floor = floor
+        self.fwd = _horizontal_forward(up)
+        self.norm = 0.0
+        if floor is not None:
+            self.norm = math.sqrt(floor.alpha ** 2 + floor.beta ** 2
+                                  + floor.gamma ** 2)
+
+    def covers(self, x: float, y: float, z: float) -> bool:
+        if self.floor is None:
+            # No floor, no heights, no mask. Masking on a guessed height
+            # would delete part of the pallet and call it a fork.
+            return False
+        r = _perp_residual(self.floor, x, y, z, self.norm)
+        if r is None:
+            return False
+        d_h = z * (x * self.fwd[0] + y * self.fwd[1] + self.fwd[2])
+        return self.mask.covers(x * z, -r, d_h)
+
+
+def bind_self_mask(mask, floor: Optional["Plane"],
+                   up: Tuple[float, float, float]
+                   ) -> Optional[_SelfVolume]:
+    """A per-frame mask, or None when there is nothing to mask."""
+    if mask is None:
+        return None
+    return _SelfVolume(mask, floor, up)
+
+
+def blob_touches_border(frame: DepthFrame,
+                        bbox: Tuple[int, int, int, int]) -> bool:
+    """Does this standing object run off the edge of the image.
+
+    A clipped object's width and height in metres are LOWER BOUNDS, and
+    the plane fitted to it is fitted to a part, so any claim about the
+    WHOLE object - its size, its yaw, whether it has two pockets - is a
+    claim the frame does not support. `m8_core.abort` is the caller that
+    acts on this; nothing in the segmentation is changed by it.
+
+    `_blob_candidates` clamps a box to the frame, so a blob that reached
+    an edge sits exactly on 0 or on width / height.
+    """
+    u0, u1, v0, v1 = bbox
+    return bool(u0 <= 0 or v0 <= 0 or u1 >= frame.width or v1 >= frame.height)
+
+
 def _refuse(trace: Optional[Dict[str, object]], why: str) -> None:
     """Name the gate that stopped this frame, then return None.
 
@@ -545,7 +625,8 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
               bbox: Tuple[int, int, int, int], stride: int,
               up: Tuple[float, float, float],
               window: Tuple[float, float],
-              trace: Optional[Dict[str, object]] = None
+              trace: Optional[Dict[str, object]] = None,
+              masked: Optional[_SelfVolume] = None
               ) -> Optional[Tuple[Plane, int, Tuple[int, int, int, int],
                                   Optional[float], float]]:
     """Fit the pallet face inside bbox and return its own pixel box.
@@ -579,6 +660,8 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
             x = frame.x_of(u)
             d_h = z * (x * fwd[0] + y * fwd[1] + fwd[2])
             if d_h < lo or d_h > hi:
+                continue
+            if masked is not None and masked.covers(x, y, z):
                 continue
             height = 0.0
             if floor is not None:
@@ -696,8 +779,8 @@ def segment(frame: DepthFrame,
             expected_range: Optional[float] = None,
             tag_u: Optional[float] = None,
             tag_v: Optional[float] = None,
-            trace: Optional[Dict[str, object]] = None
-            ) -> Optional[FaceSegment]:
+            trace: Optional[Dict[str, object]] = None,
+            self_mask=None) -> Optional[FaceSegment]:
     """Derive the pallet-face ROI for this frame, or refuse.
 
     ORDER MATTERS and it is the order of the brief. The range window
@@ -733,11 +816,13 @@ def segment(frame: DepthFrame,
     if tag_u is not None and tag_v is not None:
         seed_px = (float(tag_u), float(tag_v))
     up = _world_up(floor)
+    masked = bind_self_mask(self_mask, floor, up)
     boxes = _blob_candidates(frame, floor, coarse, _horizontal_forward(up),
-                             window, seed_px)
+                             window, seed_px, masked)
     if trace is not None:
         trace["candidates"] = len(boxes)
         trace["tag_seeded"] = seed_px is not None
+        trace["self_masked"] = masked is not None
     attempts: List[Tuple[Optional[Plane], Tuple[int, int, int, int]]] = [
         (floor, b) for b in boxes]
     if not attempts:
@@ -748,17 +833,31 @@ def segment(frame: DepthFrame,
         # floor that reached here.
         attempts = [(None, (0, frame.width, 0, frame.height))]
     last: Dict[str, object] = {}
+    # EVERY candidate's refusal, not only the last one's. A caller that
+    # has to choose a WORD for "no face" needs the whole set: "the only
+    # thing standing here is not pallet-shaped" and "the pallet is here
+    # and merged with the truck's own forks" are both one refusal each,
+    # and they argue for opposite words. `standing` is False for the
+    # floor fallback, which is the frame itself and not a clipped object.
+    refusals: List[Dict[str, object]] = []
     for index, (floor_for_fit, bbox) in enumerate(attempts):
         step: Dict[str, object] = {}
-        seg = _try_candidate(frame, floor_for_fit, bbox, fine, window, step)
+        seg = _try_candidate(frame, floor_for_fit, bbox, fine, window, step,
+                             masked)
         if seg is not None:
             if trace is not None:
                 trace.update(step)
+                trace["refusals"] = refusals
                 trace["candidate_used"] = index
             return seg
+        refusals.append({"why": step.get("refused"), "blob": bbox,
+                         "standing": floor_for_fit is not None,
+                         "width_m": step.get("face_width_m"),
+                         "height_m": step.get("face_height_m")})
         last = step
     if trace is not None:
         trace.update(last)
+        trace["refusals"] = refusals
         trace["candidate_used"] = None
     return None
 
@@ -766,11 +865,13 @@ def segment(frame: DepthFrame,
 def _try_candidate(frame: DepthFrame, floor: Optional[Plane],
                    bbox: Tuple[int, int, int, int], fine: int,
                    window: Tuple[float, float],
-                   trace: Dict[str, object]) -> Optional[FaceSegment]:
+                   trace: Dict[str, object],
+                   masked: Optional[_SelfVolume] = None
+                   ) -> Optional[FaceSegment]:
     """Fit one standing object and put it through every gate."""
     trace["blob"] = bbox
     up = _world_up(floor)
-    fitted = _fit_face(frame, floor, bbox, fine, up, window, trace)
+    fitted = _fit_face(frame, floor, bbox, fine, up, window, trace, masked)
     if fitted is None:
         return None
     face, n_inliers, box, height_cut, frac = fitted
@@ -801,7 +902,7 @@ def _try_candidate(frame: DepthFrame, floor: Optional[Plane],
                        inliers=n_inliers, width_m=width_m,
                        height_m=height_m, up=up, blob=bbox,
                        height_cut=height_cut, inlier_frac=frac,
-                       window=window)
+                       window=window, masked=masked)
 
 
 # ------------------------------------------------------------- the pockets
@@ -828,7 +929,10 @@ def find_pocket_pair(frame: DepthFrame, seg: FaceSegment,
     v_ref = frame.y_of(0.5 * (seg.v0 + seg.v1))
     deeper = []
     for u in range(seg.u0, seg.u1):
-        med = _col_median(frame, u, seg.v0, seg.v1)
+        # The tines sit INSIDE the pockets in lateral - that is what a
+        # fork is for - and they are NEARER than the face, so an unmasked
+        # column through a pocket reads "not deeper" and the pair is lost.
+        med = _col_median(frame, u, seg.v0, seg.v1, seg.masked)
         if med is None:
             continue
         fz = seg.face.depth_at(frame.x_of(u), v_ref)
@@ -866,6 +970,9 @@ def find_pocket_pair(frame: DepthFrame, seg: FaceSegment,
             for v in range(seg.v0, seg.v1):
                 z = frame.at(u, v)
                 if z is None:
+                    continue
+                if seg.masked is not None and seg.masked.covers(
+                        frame.x_of(u), frame.y_of(v), z):
                     continue
                 fz = seg.face.depth_at(frame.x_of(u), frame.y_of(v))
                 if fz is not None and z > fz + POCKET_MIN_DEPTH_M:
@@ -927,6 +1034,13 @@ def fork_path_fraction(frame: DepthFrame, seg: FaceSegment,
             pz = seg.floor.depth_at(x, y)
             if pz is None or pz - z <= OBJECT_CLEARANCE_M:
                 continue
+            # The truck's own forks travel in the fork band by
+            # definition. Counting them as an obstruction in it would
+            # abort every clean dock, which is the trap
+            # EVIDENCE_M8_C1C2_FIX miss 2 named when it refused to widen
+            # this search without a self-mask.
+            if seg.masked is not None and seg.masked.covers(x, y, z):
+                continue
             r = _perp_residual(seg.floor, x, y, z, floor_norm)
             if r is None:
                 continue
@@ -971,8 +1085,8 @@ def observe(frame: DepthFrame,
             expected_range: Optional[float] = None,
             tag_u: Optional[float] = None,
             tag_v: Optional[float] = None,
-            trace: Optional[Dict[str, object]] = None
-            ) -> Optional[PocketObservation]:
+            trace: Optional[Dict[str, object]] = None,
+            self_mask=None) -> Optional[PocketObservation]:
     """The pocket-pair point, or None.
 
     `expected_range`, `tag_u` and `tag_v` are the live tag's reading if
@@ -980,7 +1094,8 @@ def observe(frame: DepthFrame,
     ever narrowing: tagless docking runs on the range window alone.
     """
     seg = segment(frame, expected_range=expected_range,
-                  tag_u=tag_u, tag_v=tag_v, trace=trace)
+                  tag_u=tag_u, tag_v=tag_v, trace=trace,
+                  self_mask=self_mask)
     if seg is None:
         return None
     pair = find_pocket_pair(frame, seg, trace)
@@ -1010,7 +1125,8 @@ def propose(frame: DepthFrame,
             tag_v: Optional[float] = None,
             tag_z: Optional[float] = None,
             ttl_ms: int = DEFAULT_TTL_MS,
-            expected_range: Optional[float] = None) -> Optional[object]:
+            expected_range: Optional[float] = None,
+            self_mask=None) -> Optional[object]:
     """Build a DOCK_TARGET_REFINE vs the tag-derived target.
 
     tag_* default to the image centre / fitted face - the shadow
@@ -1025,7 +1141,7 @@ def propose(frame: DepthFrame,
     choose between candidate blobs, inside `observe`.
     """
     obs = observe(frame, expected_range=expected_range,
-                  tag_u=tag_u, tag_v=tag_v)
+                  tag_u=tag_u, tag_v=tag_v, self_mask=self_mask)
     if obs is None:
         return None
     tu = frame.cx if tag_u is None else float(tag_u)

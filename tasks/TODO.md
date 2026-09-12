@@ -346,3 +346,77 @@ the load-bearing ones are that C1 sees nothing at 1.0 m on the plant,
 that Phase B cannot open on a 0.884 live false-abort, and that
 `pocket_blocked`'s word and the live-cycle frame counts have numbers
 but no explanation.
+
+---
+
+# M8 E3 words + fork self-mask (branch `m8/c2-words-and-selfmask`)
+
+2026-09-12, owner GO on the ratified E3 false-abort plan: classical
+steps 0-5, NOT Phase F; branch off `35ed6aa`; PR #11 stays open and
+unmerged; no baseline overwritten; new `bench/results/` folders only.
+All four held.
+
+- [x] 0. INSTRUMENT, no classifier change. Four joins the 0.884 run did
+      not have: the range band, the NAMED refusal `segment` raised, the
+      retry count and docking state at the frame's own sim stamp (joined
+      from the dock session's `feedback.csv`), and the pallet gz pose
+      read back ON A TIMER during the cycle. `countable` is the interim
+      bar's population stated as a population; a frame the join could
+      not reach is not countable, because unknown is not zero.
+- [x] 1. WORD POLICY, no threshold moved. `pallet_absent` needs
+      evidence - a candidate measured and found not to be a pallet. One
+      "could still be the pallet" refusal outvotes any number of others;
+      an unclassified refusal name says nothing. A segment running off
+      the image supports no word about the WHOLE pallet, but clipping
+      only undermines a LOWER bound, so "too wide", "too tall", "this is
+      a floor" and `stringer_in_path` all survive it.
+- [x] 2. FORK SELF-MASK, `m8_core/selfmask.py`, every number off
+      model.sdf and config.yaml. A STALE `mast_joint` reading silences
+      the classifier rather than placing a mask that would delete the
+      pallet - at 1.0 m the tine tips are 25 mm from the face.
+- [x] 3. OCCLUDER-AWARE SHARE: NOT DONE, and the measurement is why.
+      `pocket_blocked`'s wrong word is the SHAPE gate, not the share
+      gate - `blocked_by_box` refuses at inlier fraction 1.0. Cause
+      established (see open items); the fix is a threshold move and was
+      out of scope.
+- [x] 4. FORK-CORRIDOR STRINGER: NOT DONE. Optional and last. The
+      self-mask removes the blocker that stopped it, so it is now
+      buildable; it is not built and not measured here.
+- [x] 5. TAG WIRED - and the plant proved the first version of it wrong.
+      On this rig the AprilTag is the DOCK MARKER on the bay back panel,
+      0.8525 m behind the pallet face (measured, 113 frames), so its
+      range opened the window around the panel. 57 of 113 tagged frames
+      turned `none` into `pallet_absent`; 0 of 427 mask-only frames did.
+      Corrected with a CONFIG constant (0.82 = pallet depth + wall
+      clearance) and the 0.0325 m residual stated, not tuned. A
+      reference column is only a reference at one depth, so `classify`
+      now takes `target_lateral_m` in metres; `target_u`/`target_v` are
+      not passed on this rig because they seed the marker board.
+- [x] 6. PLANT, 2026-09-12, three sessions: `e3-20260912-181548` (the
+      run that found the tag defect, kept), `e3-20260912-184020`
+      (static, 540 frames) and `e3-20260912-190415` (live, 87 countable
+      frames). Offline `words-20260912-190835`, 22 cases x 5 seeds.
+
+      **Clean static false-abort 30/90 -> 0/90. Live false-abort 0.884
+      -> 0.184 unwired, -> 0.011 AS THE NODES NOW RUN, on 87 frames of
+      two docks the plugin finished error 0 with retries 0 and a pallet
+      readback on every frame. THE INTERIM BAR (< 0.10) IS MET WIRED AND
+      IS NOT MET UNWIRED.** `pallet_rotated` at 1.0 m: exact 0/30 ->
+      29/30. Segmentations resolved 244 -> 364, none lost.
+
+- [ ] 7. OPEN, in the order the numbers argue for it: `stringer_in_path`
+      recall is 0/90 and step 4 is the fix; `pocket_blocked` exact is
+      4/90 with the cause now established; the 0.0325 m marker residual
+      is unexplained; `pallet_shifted` 0.30 m still needs a smaller
+      threshold; the rig dropped `gz set_pose` twice in five runs.
+      PHASE B STAYS ON HOLD. E4/E5 NOT_RUN.
+
+## Review
+Suite 121 -> 187, `python -m pytest m8/tests`, no ROS on the machine.
+Evidence: `m8/EVIDENCE_M8_E3_WORDS.md`. `EVIDENCE_M8_E3.md` and
+`EVIDENCE_M8_C1C2_FIX.md` carry a forward pointer and are otherwise
+untouched; no existing result folder was overwritten; PR #11 was not
+merged and `main` was not touched. The load-bearing open items are that
+`stringer_in_path` is not caught at all, that the 0.011 live figure
+rests on 87 frames of two docks, and that the rig's `gz set_pose`
+fault forces the bench to be run in two halves.

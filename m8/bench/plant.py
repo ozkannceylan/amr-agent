@@ -428,7 +428,7 @@ class Capture(object):
             from tf2_ros import Buffer, TransformListener
             from geometry_msgs.msg import PoseWithCovarianceStamped
             from nav_msgs.msg import Odometry
-            from sensor_msgs.msg import CameraInfo, Image
+            from sensor_msgs.msg import CameraInfo, Image, JointState
         except ImportError as exc:
             plant.cfg.refuse("rclpy, tf2_ros, sensor_msgs and nav_msgs are importable",
                              plant._common.CONFIG + " (paths.ros_setup)",
@@ -448,6 +448,7 @@ class Capture(object):
         self._listener = TransformListener(self.buf, self.node)
         self.info = None
         self.truth = None          # (stamp, (x,y,z), (qx,qy,qz,qw))
+        self.mast = None           # (stamp, position_m) of mast_joint
         self._frames = []
         self._want = 0
         self._on_frame = None
@@ -461,6 +462,11 @@ class Capture(object):
         self.node.create_subscription(CameraInfo, self.info_topic, self._cb_info, 10)
         self.node.create_subscription(Odometry, self.truth_topic, self._cb_truth, 20)
         self.node.create_subscription(Image, self.depth_topic, self._cb_depth, 5)
+        # Where the truck's own forks are, for m8_core.selfmask. A joint
+        # POSITION in metres - not a command, not a frame, not a pose.
+        self.joint_topic = cfg.s("topics.joint_state")
+        self.node.create_subscription(JointState, self.joint_topic,
+                                      self._cb_joints, 10)
 
     # callbacks
     def _cb_info(self, msg):
@@ -475,6 +481,33 @@ class Capture(object):
         q = msg.pose.pose.orientation
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         self.truth = (t, (p.x, p.y, p.z), (q.x, q.y, q.z, q.w))
+
+    def _cb_joints(self, msg):
+        from m8_core.topics import MAST_JOINT
+        try:
+            index = list(msg.name).index(MAST_JOINT)
+        except ValueError:
+            return
+        if index >= len(msg.position):
+            return
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        self.mast = (t, float(msg.position[index]))
+
+    def _lookup_tag(self, stamp_msg):
+        """The live AprilTag as the shadow nodes read it, or None.
+
+        The SAME code path the nodes use - `m8_nodes.tag_target.read_tag`
+        on the same three transforms - so a bench number is a statement
+        about what the node would do and not about what the bench does.
+        Ground truth is not in it: this is apriltag_node's own broadcast.
+        """
+        if self.info is None:
+            return None
+        from m8_nodes.tag_target import read_tag
+        return read_tag(self.buf, self.Time.from_msg(stamp_msg),
+                        self.info.get("fx"), self.info.get("fy"),
+                        self.info.get("cx"), self.info.get("cy"),
+                        stamp=stamp_msg.sec + stamp_msg.nanosec * 1e-9)
 
     def _lookup_map_optical(self, stamp_msg):
         try:
@@ -501,8 +534,10 @@ class Capture(object):
             "step": int(msg.step), "encoding": msg.encoding,
             "data": bytes(msg.data),
             "truth": self.truth,
+            "mast": self.mast,
             "info": dict(self.info) if self.info else None,
             "map_optical": self._lookup_map_optical(msg.header.stamp),
+            "tag": self._lookup_tag(msg.header.stamp),
         }
         if self._on_frame is not None:
             self._on_frame(frame)
