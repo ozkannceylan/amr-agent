@@ -98,15 +98,22 @@ REGIMES = (("staging", 2.0, float("inf")),
 # under the 0.16 m pocket it would take to matter.
 PALLET_MOVED_TOL_M = 0.02
 
-# The paired second classification, with the truck's own forks masked
-# out of the frame. `mast_q_m` is the joint reading the mask was built
-# from and `mask_stale` is whether it was old enough to distrust - both
-# are recorded whether or not they changed anything, because "the mask
-# made no difference" is only a finding if the mask was actually fresh.
-MASK_FIELDS = (
-    "mast_q_m", "mast_stamp", "mask_stale", "reason_masked", "abort_masked",
-    "seg_ok_masked", "refused_masked", "seg_width_masked_m",
-    "seg_yaw_masked_rad", "t_classify_masked_s",
+# THE PAIRED SECOND CLASSIFICATION - the same depth buffer, classified
+# again AS THE SHADOW NODES NOW RUN IT: the truck's own forks masked out
+# (m8_core.selfmask, from mast_joint) and the live AprilTag passed as the
+# narrowing target (m8_nodes.tag_target, the same code path the nodes
+# use). The FIRST classification stays exactly what session
+# e3-20260912-000826 measured - no mask, no tag - so the two are
+# comparable against the baseline and against each other.
+#
+# `mast_q_m` / `mask_stale` and `tag_u` / `tag_range_m` / `tag_stale` are
+# recorded whether or not they changed anything: "it made no difference"
+# is only a finding if the input was there and fresh.
+WIRED_FIELDS = (
+    "mast_q_m", "mast_stamp", "mask_stale",
+    "tag_u", "tag_v", "tag_range_m", "tag_z_m", "tag_stale",
+    "reason_wired", "abort_wired", "seg_ok_wired", "refused_wired",
+    "seg_width_wired_m", "seg_yaw_wired_rad", "t_classify_wired_s",
 )
 
 STATIC_FIELDS = (
@@ -116,7 +123,7 @@ STATIC_FIELDS = (
     "seg_ok", "refused", "candidates", "in_window", "inlier_frac",
     "roi_u0", "roi_u1", "roi_v0", "roi_v1", "seg_width_m",
     "seg_height_m", "seg_yaw_rad", "t_decode_s", "t_classify_s",
-) + MASK_FIELDS
+) + WIRED_FIELDS
 CYCLE_FIELDS = (
     "cycle", "k", "stamp", "wall", "regime", "reason", "abort",
     "truth_x", "truth_y", "truth_yaw", "cam_range_m", "valid_frac",
@@ -125,7 +132,7 @@ CYCLE_FIELDS = (
     "seg_height_m", "seg_yaw_rad",
     "num_retries", "dock_state", "retry_joined",
     "pallet_readback_ok", "pallet_moved_m", "countable", "t_classify_s",
-) + MASK_FIELDS
+) + WIRED_FIELDS
 
 
 def _not_run(why=""):
@@ -179,7 +186,7 @@ def mask_for(frame):
     return from_mast_joint(mast[1], mast[0])
 
 
-def classify_frame(frame, self_mask=None, also_masked=False):
+def classify_frame(frame, self_mask=None, also_wired=False):
     """The classifier's word plus every column needed to read it back.
 
     Returns a dict. `reason` is `m8_core.abort.classify` on the frame the
@@ -196,11 +203,12 @@ def classify_frame(frame, self_mask=None, also_masked=False):
     The trace costs a second segmentation pass. That is deliberate: the
     timed number stays the node's own cost and not the bench's.
 
-    With `also_masked`, the SAME frame is classified a second time with
-    the truck's own forks masked out of it, and the result lands in the
-    `*_masked` columns. Two classifiers on one frame is the only way to
-    attribute a difference to the mask rather than to the weather: a
-    paired comparison needs the pair.
+    With `also_wired`, the SAME frame is classified a second time as the
+    shadow nodes now run it - forks masked out, tag passed as the
+    narrowing target - and the result lands in the `*_wired` columns. Two
+    classifications of one buffer is the only way to attribute a
+    difference to the wiring rather than to the weather: a paired
+    comparison needs the pair.
     """
     from bench import plant as P
     from m8_core.abort import classify
@@ -231,31 +239,45 @@ def classify_frame(frame, self_mask=None, also_masked=False):
         out.update(roi_u0=seg.u0, roi_u1=seg.u1, roi_v0=seg.v0, roi_v1=seg.v1,
                    seg_width_m=seg.width_m, seg_height_m=seg.height_m,
                    seg_yaw_rad=face_yaw(seg.face, seg.up))
-    if also_masked:
+    if also_wired:
+        from m8_nodes.tag_target import kwargs_for
         mask = mask_for(frame)
+        tag = frame.get("tag")
         out["mast_q_m"] = frame["mast"][1] if frame.get("mast") else None
         out["mast_stamp"] = frame["mast"][0] if frame.get("mast") else None
         out["mask_stale"] = ("" if mask is None
                              else (1 if mask.is_stale(df.sim_stamp) else 0))
-        if mask is None:
-            out["reason_masked"] = "mask_none"
-            out["refused_masked"] = ""
-            out["seg_ok_masked"] = ""
+        if tag is not None:
+            out["tag_u"] = tag.u
+            out["tag_v"] = tag.v
+            out["tag_range_m"] = tag.range_m
+            out["tag_z_m"] = tag.z
+            out["tag_stale"] = 1 if tag.is_stale(df.sim_stamp) else 0
+        tag_kw = kwargs_for(tag, df.sim_stamp)
+        if mask is None and not tag_kw:
+            # Nothing to wire: no joint state and no usable tag. Recorded
+            # by name, never as a fresh mask at the bottom stop.
+            out["reason_wired"] = "nothing_wired"
+            out["refused_wired"] = ""
+            out["seg_ok_wired"] = ""
         else:
             t3 = time.perf_counter()
-            reason_m = classify(df, self_mask=mask)
-            out["t_classify_masked_s"] = time.perf_counter() - t3
-            mtrace = {}
-            seg_m = segment(df, trace=mtrace, self_mask=mask)
-            out["reason_masked"] = reason_m or "none"
-            out["abort_masked"] = 1 if reason_m else 0
-            out["seg_ok_masked"] = 1 if seg_m is not None else 0
-            out["refused_masked"] = ("" if seg_m is not None
-                                     else str(mtrace.get("refused")
-                                              or "unnamed"))
-            if seg_m is not None:
-                out["seg_width_masked_m"] = seg_m.width_m
-                out["seg_yaw_masked_rad"] = face_yaw(seg_m.face, seg_m.up)
+            reason_w = classify(df, self_mask=mask, **tag_kw)
+            out["t_classify_wired_s"] = time.perf_counter() - t3
+            wtrace = {}
+            seg_w = segment(df, trace=wtrace, self_mask=mask,
+                            expected_range=tag_kw.get("expected_range"),
+                            tag_u=tag_kw.get("target_u"),
+                            tag_v=tag_kw.get("target_v"))
+            out["reason_wired"] = reason_w or "none"
+            out["abort_wired"] = 1 if reason_w else 0
+            out["seg_ok_wired"] = 1 if seg_w is not None else 0
+            out["refused_wired"] = ("" if seg_w is not None
+                                    else str(wtrace.get("refused")
+                                             or "unnamed"))
+            if seg_w is not None:
+                out["seg_width_wired_m"] = seg_w.width_m
+                out["seg_yaw_wired_rad"] = face_yaw(seg_w.face, seg_w.up)
     return out
 
 
@@ -296,7 +318,7 @@ def run_static(plant, cap, args, inject, P):
             for k, frame in enumerate(frames):
                 if frame.get("info") is None:
                     frame["info"] = info
-                out = classify_frame(frame, also_masked=args.self_mask)
+                out = classify_frame(frame, also_wired=args.self_mask)
                 row = dict(out)
                 row.update({
                     "pose": label, "regime": regime_of(cam_range),
@@ -460,7 +482,7 @@ def run_cycles(plant, cap, args, inject, P, dest):
         crow = []
 
         def on_frame(frame, _c=c, _rows=crow, _mask=args.self_mask):
-            out = classify_frame(frame, also_masked=_mask)
+            out = classify_frame(frame, also_wired=_mask)
             tr = frame.get("truth")
             row = dict(out)
             row.update({"cycle": _c, "k": len(_rows), "stamp": frame["stamp"],
@@ -624,12 +646,12 @@ def summarise(static_rows, cycle_rows, outcomes, inject):
             "pallet_moved_or_unread": len(moved_rows),
             "note": ("reported, never folded in: a frame whose retry count "
                      "the bench could not reach is unknown, not zero")},
-        "self_mask": _mask_summary(static_rows, cycle_rows),
+        "as_wired": _wired_summary(static_rows, cycle_rows),
         "t_classify_s": geom.summarise([r["t_classify_s"] for r in static_rows + cycle_rows]),
     }
 
 
-def _mask_summary(static_rows, cycle_rows):
+def _wired_summary(static_rows, cycle_rows):
     """The paired fork-self-mask comparison, on the frames that had one.
 
     A word that changed is only attributable to the mask when the mask
@@ -639,23 +661,26 @@ def _mask_summary(static_rows, cycle_rows):
     mask and nothing else.
     """
     def block(rows, label):
-        paired = [r for r in rows if r.get("mask_stale") == 0]
-        stale = sum(1 for r in rows if r.get("mask_stale") == 1)
-        none = sum(1 for r in rows if r.get("reason_masked") == "mask_none")
+        paired = [r for r in rows if r.get("reason_wired")
+                  not in (None, "", "nothing_wired")]
+        stale = sum(1 for r in rows if r.get("mask_stale") == 1
+                    or r.get("tag_stale") == 1)
+        none = sum(1 for r in rows
+                   if r.get("reason_wired") == "nothing_wired")
         moves = {}
         for r in paired:
-            key = "{} -> {}".format(r["reason"], r.get("reason_masked"))
+            key = "{} -> {}".format(r["reason"], r.get("reason_wired"))
             moves[key] = moves.get(key, 0) + 1
         gained = sum(1 for r in paired
-                     if r.get("seg_ok") == 0 and r.get("seg_ok_masked") == 1)
+                     if r.get("seg_ok") == 0 and r.get("seg_ok_wired") == 1)
         lost = sum(1 for r in paired
-                   if r.get("seg_ok") == 1 and r.get("seg_ok_masked") == 0)
+                   if r.get("seg_ok") == 1 and r.get("seg_ok_wired") == 0)
         aborts = sum(r["abort"] for r in paired)
-        m_aborts = sum(r.get("abort_masked", 0) for r in paired)
+        m_aborts = sum(r.get("abort_wired", 0) for r in paired)
         return {
             "population": label, "paired": len(paired),
-            "mask_stale": stale, "mask_absent": none,
-            "aborts_unmasked": aborts, "aborts_masked": m_aborts,
+            "mask_stale": stale, "nothing_wired": none,
+            "aborts_unmasked": aborts, "aborts_wired": m_aborts,
             "segmented_gained": gained, "segmented_lost": lost,
             "word_moves": dict(sorted(
                 ((k, v) for k, v in moves.items() if not k.endswith(
@@ -666,8 +691,8 @@ def _mask_summary(static_rows, cycle_rows):
                        "aborts_unmasked": sum(
                            r["abort"] for r in paired
                            if r.get("regime") == band),
-                       "aborts_masked": sum(
-                           r.get("abort_masked", 0) for r in paired
+                       "aborts_wired": sum(
+                           r.get("abort_wired", 0) for r in paired
                            if r.get("regime") == band)}
                 for band, _lo, _hi in REGIMES
                 if any(r.get("regime") == band for r in paired)},
@@ -759,17 +784,17 @@ def write_summary_txt(path, session, summ, plant, args, inject):
                      ex.get("on_a_retry"), ex.get("retry_unjoined"),
                      ex.get("pallet_moved_or_unread")))
     lines.append("")
-    lines.append("FORK SELF-MASK - same frames, classified twice "
-                 "(m8_core.selfmask from mast_joint)")
+    lines.append("AS WIRED - same frames, classified twice: baseline, then "
+                 "fork self-mask + tag-derived target as the nodes run it")
     for key in ("static", "cycles", "cycles_countable"):
-        blk = summ.get("self_mask", {}).get(key)
+        blk = summ.get("as_wired", {}).get(key)
         if not blk:
             continue
         lines.append("  {:<24} paired {} (stale {}, absent {}) | aborts {} -> "
                      "{} | segmented gained {} lost {}".format(
                          blk["population"], blk["paired"], blk["mask_stale"],
-                         blk["mask_absent"], blk["aborts_unmasked"],
-                         blk["aborts_masked"], blk["segmented_gained"],
+                         blk["nothing_wired"], blk["aborts_unmasked"],
+                         blk["aborts_wired"], blk["segmented_gained"],
                          blk["segmented_lost"]))
         if blk["word_moves"]:
             lines.append("  {:<24} words that moved: {}".format(
@@ -777,7 +802,7 @@ def write_summary_txt(path, session, summ, plant, args, inject):
         if blk["by_regime"]:
             lines.append("  {:<24} by band: {}".format("", {
                 b: "{}->{} of {}".format(c["aborts_unmasked"],
-                                         c["aborts_masked"], c["paired"])
+                                         c["aborts_wired"], c["paired"])
                 for b, c in blk["by_regime"].items()}))
     lines.append("")
     t = summ["t_classify_s"]
@@ -850,9 +875,9 @@ def main(argv=None):
     parser.add_argument("--frames", type=int, default=DEFAULT_FRAMES)
     parser.add_argument("--ranges", default=DEFAULT_RANGES)
     parser.add_argument("--cycles", type=int, default=DEFAULT_CYCLES)
-    parser.add_argument("--no-self-mask", dest="self_mask",
+    parser.add_argument("--no-wired", dest="self_mask",
                         action="store_false", default=True,
-                        help="skip the paired fork-self-mask classification")
+                        help="skip the paired as-wired classification")
     args = parser.parse_args(argv)
     return run(args)
 

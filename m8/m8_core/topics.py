@@ -29,9 +29,17 @@ CONSUMER_DOCK = "/m8/consumer/dock_target"
 CONSUMER_ABORT = "/m8/consumer/abort"
 CONSUMER_SPEED = "/m8/consumer/speed_ceiling"
 
+# Frames the shadow nodes LOOK UP. m5_ver3/config.yaml frames.* and
+# apriltag.tag_frame; M8 broadcasts none of them and must not - the
+# transform tree has its owners already (F2's EKF, AMCL, apriltag_node).
+FRAME_BASE = "base_link"
+FRAME_CAM_OPTICAL = "pallet_cam_optical"
+FRAME_TAG = "tag36h11_0"
+
 PUBLISH_TOPICS = (PROPOSAL, VERDICT, HEALTH, LOG)
 SUBSCRIBE_CAMERA = (CAM_DEPTH, CAM_INFO)
 SUBSCRIBE_VEHICLE = (JOINT_STATE,)
+LOOKUP_FRAMES = (FRAME_BASE, FRAME_CAM_OPTICAL, FRAME_TAG)
 A1_NODE_FILES = (
     "pocket_pose_node.py",
     "abort_node.py",

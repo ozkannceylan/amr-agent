@@ -53,15 +53,24 @@ def test_unmeasured_health_is_not_ok_placeholder_is():
 
 
 def test_rclpy_is_imported_only_inside_main():
+    """No ROS import above `main`, in EVERY file under m8_nodes.
+
+    The check applies to the helpers too - `io.py`, `tag_target.py` - and
+    for them there is no `main` to be below, so the bar is simply that
+    the import is not there at all. H0 is `pytest m8/tests` on a machine
+    that has never sourced ROS, and one module-level `import rclpy` in a
+    helper breaks it as surely as one in a node.
+    """
     hits = []
     for path in sorted(_NODES.glob("*.py")):
-        if path.name in ("__init__.py", "io.py"):
+        if path.name == "__init__.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         mains = [n for n in tree.body
                  if isinstance(n, ast.FunctionDef) and n.name == "main"]
-        assert mains, path.name
-        main_nodes = set(id(x) for x in ast.walk(mains[0]))
+        if path.name.endswith("_node.py") or path.name == "m8_health.py":
+            assert mains, path.name
+        main_nodes = set(id(x) for x in ast.walk(mains[0])) if mains else set()
         for node in ast.walk(tree):
             names = []
             if isinstance(node, ast.Import):
@@ -69,7 +78,8 @@ def test_rclpy_is_imported_only_inside_main():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module.split(".")[0]]
             if "rclpy" in names or "sensor_msgs" in names:
-                if id(node) not in main_nodes and not _inside(node, mains[0]):
+                if not mains or (id(node) not in main_nodes
+                                 and not _inside(node, mains[0])):
                     hits.append("{} imports ROS at module level".format(
                         path.name))
     assert hits == [], hits

@@ -493,6 +493,22 @@ class Capture(object):
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         self.mast = (t, float(msg.position[index]))
 
+    def _lookup_tag(self, stamp_msg):
+        """The live AprilTag as the shadow nodes read it, or None.
+
+        The SAME code path the nodes use - `m8_nodes.tag_target.read_tag`
+        on the same three transforms - so a bench number is a statement
+        about what the node would do and not about what the bench does.
+        Ground truth is not in it: this is apriltag_node's own broadcast.
+        """
+        if self.info is None:
+            return None
+        from m8_nodes.tag_target import read_tag
+        return read_tag(self.buf, self.Time.from_msg(stamp_msg),
+                        self.info.get("fx"), self.info.get("fy"),
+                        self.info.get("cx"), self.info.get("cy"),
+                        stamp=stamp_msg.sec + stamp_msg.nanosec * 1e-9)
+
     def _lookup_map_optical(self, stamp_msg):
         try:
             tf = self.buf.lookup_transform(self.map_frame, self.optical_frame,
@@ -521,6 +537,7 @@ class Capture(object):
             "mast": self.mast,
             "info": dict(self.info) if self.info else None,
             "map_optical": self._lookup_map_optical(msg.header.stamp),
+            "tag": self._lookup_tag(msg.header.stamp),
         }
         if self._on_frame is not None:
             self._on_frame(frame)
