@@ -27,6 +27,33 @@ word. `proceed` is not an output and is not counted. Nothing here
 commands the vehicle: dock_bench.py is the m5-ver3 instrument that does,
 and it is run as it is.
 
+WHAT THE INSTRUMENT RECORDS, AND WHY IT HAD TO GROW. The 2026-09-12 run
+(`e3-20260912-000826`) measured a live false-abort rate of 0.884 and
+could not say what the 948 aborts WERE. One word - `pallet_absent` -
+covers both "the bay is empty" and "C1 refused and the caller had no
+other word", and the session held no column that told them apart. Four
+joins were missing and are added here, with NO change to the classifier:
+
+  REGIME    which range band the frame was taken in, so a rate can be
+            read per band instead of averaged over an approach that
+            crosses three of them.
+  REFUSED   the NAMED refusal `m8_core.pocket.segment` raised for this
+            frame (`face_is_too_small_a_share`,
+            `face_width_not_pallet_sized`, ...), recomputed outside the
+            timed call. "no pose" and "no pose BECAUSE the face was 23 %
+            of the blob" are not the same finding.
+  RETRIES   `num_retries` and the docking state at the frame's own sim
+            stamp, joined from the dock session's `feedback.csv`. A frame
+            taken during a retry is a different population from one taken
+            on a first, uninterrupted approach.
+  READBACK  the pallet's gz pose before and after each cycle. A cycle
+            that ended with the pallet shoved 0.2 m is not a clean cycle
+            and must not be averaged into one.
+
+The regime edges and the moved-pallet tolerance below are BENCH constants
+for slicing a table. They are not thresholds in the classifier and
+nothing in `m8_core` reads them.
+
 Standing cautions: ground truth is a score, not a command; no PL / SIL
 / PFH claims; the collision monitor is not a safety function; frames
 never leave the rig; the F-PLC never receives M8 input.
@@ -58,16 +85,35 @@ CYCLE_TIMEOUT_S = 420.0
 REASONS = ("pallet_absent", "pallet_rotated", "pallet_shifted",
            "pocket_blocked", "stringer_in_path")
 
+# Range bands, camera -> design face, in metres. The edges are where
+# this rig's behaviour is already known to change: staging is 2.245 m,
+# and EVIDENCE_M8_C1C2_FIX measured C1 refusing inside ~1.2 m because
+# the truck's own forks are continuous with the pallet there. SLICING
+# ONLY - no gate in m8_core reads these.
+REGIMES = (("staging", 2.0, float("inf")),
+           ("approach", 1.2, 2.0),
+           ("close", 0.0, 1.2))
+# A cycle whose pallet moved further than this is not a clean cycle. The
+# gz readback jitter is millimetres; 0.02 m is an order over it and well
+# under the 0.16 m pocket it would take to matter.
+PALLET_MOVED_TOL_M = 0.02
+
 STATIC_FIELDS = (
-    "pose", "condition", "k", "stamp", "reason", "abort", "exact",
+    "pose", "regime", "condition", "k", "stamp", "reason", "abort", "exact",
     "cam_range_m", "tru_lat_m", "tru_range_m", "face_u0", "face_u1",
     "face_v0", "face_v1", "face_frac_plane_roi", "valid_frac",
+    "seg_ok", "refused", "candidates", "in_window", "inlier_frac",
     "roi_u0", "roi_u1", "roi_v0", "roi_v1", "seg_width_m",
     "seg_height_m", "seg_yaw_rad", "t_decode_s", "t_classify_s",
 )
 CYCLE_FIELDS = (
-    "cycle", "k", "stamp", "wall", "reason", "abort", "truth_x", "truth_y",
-    "truth_yaw", "cam_range_m", "valid_frac", "t_classify_s",
+    "cycle", "k", "stamp", "wall", "regime", "reason", "abort",
+    "truth_x", "truth_y", "truth_yaw", "cam_range_m", "valid_frac",
+    "seg_ok", "refused", "candidates", "in_window", "inlier_frac",
+    "roi_u0", "roi_u1", "roi_v0", "roi_v1", "seg_width_m",
+    "seg_height_m", "seg_yaw_rad",
+    "num_retries", "dock_state", "retry_joined",
+    "pallet_readback_ok", "pallet_moved_m", "countable", "t_classify_s",
 )
 
 
@@ -91,14 +137,38 @@ def _fmt(v, nd=4):
     return str(v)
 
 
-def classify_frame(frame):
-    """(reason or None, valid_frac, t_decode, t_classify, seg) via m8_core.abort.
+def regime_of(cam_range_m):
+    """Which range band a frame was taken in. Bench slicing, not a gate."""
+    if cam_range_m is None:
+        return "unknown"
+    try:
+        r = float(cam_range_m)
+    except (TypeError, ValueError):
+        return "unknown"
+    if math.isnan(r):
+        return "unknown"
+    for name, lo, hi in REGIMES:
+        if lo <= r < hi:
+            return name
+    return "unknown"
 
-    `seg` is the face ROI C2 derived for this frame, recomputed OUTSIDE
-    the timed call. E3's baseline could only record the fixed ROI it was
-    told about; a classifier that derives its own has to log it, or
-    "pallet_absent" cannot be told apart from "the pallet was there and
-    the segmentation missed it".
+
+def classify_frame(frame):
+    """The classifier's word plus every column needed to read it back.
+
+    Returns a dict. `reason` is `m8_core.abort.classify` on the frame the
+    shadow node would receive, unmodified, and it is the only thing
+    inside the timed section. Everything else is recomputed OUTSIDE it:
+
+      * the derived face ROI, because a classifier that derives its own
+        ROI has to log it or `pallet_absent` cannot be told apart from
+        "the pallet was there and the segmentation missed it";
+      * the NAMED refusal, out of the same `trace` dict
+        `bench/diag_segment.py` reads, because `seg is None` is a fact
+        and `face_is_too_small_a_share` is a diagnosis.
+
+    The trace costs a second segmentation pass. That is deliberate: the
+    timed number stays the node's own cost and not the bench's.
     """
     from bench import plant as P
     from m8_core.abort import classify
@@ -109,15 +179,27 @@ def classify_frame(frame):
     t1 = time.perf_counter()
     reason = classify(df)
     t2 = time.perf_counter()
-    seg = segment(df)
-    info = None
-    if seg is not None:
-        info = {"roi_u0": seg.u0, "roi_u1": seg.u1,
-                "roi_v0": seg.v0, "roi_v1": seg.v1,
-                "seg_width_m": seg.width_m, "seg_height_m": seg.height_m,
-                "seg_yaw_rad": face_yaw(seg.face, seg.up)}
+    trace = {}
+    seg = segment(df, trace=trace)
     valid = sum(1 for z in depths if math.isfinite(z) and z > 0.0)
-    return reason, valid / float(len(depths)), t1 - t0, t2 - t1, info
+    out = {
+        "reason": reason or "none",
+        "abort": 1 if reason else 0,
+        "valid_frac": valid / float(len(depths)),
+        "t_decode_s": t1 - t0,
+        "t_classify_s": t2 - t1,
+        "seg_ok": 1 if seg is not None else 0,
+        "refused": "" if seg is not None else str(trace.get("refused")
+                                                  or "unnamed"),
+        "candidates": trace.get("candidates"),
+        "in_window": trace.get("in_window"),
+        "inlier_frac": trace.get("inlier_frac"),
+    }
+    if seg is not None:
+        out.update(roi_u0=seg.u0, roi_u1=seg.u1, roi_v0=seg.v0, roi_v1=seg.v1,
+                   seg_width_m=seg.width_m, seg_height_m=seg.height_m,
+                   seg_yaw_rad=face_yaw(seg.face, seg.up))
+    return out
 
 
 def run_static(plant, cap, args, inject, P):
@@ -157,17 +239,15 @@ def run_static(plant, cap, args, inject, P):
             for k, frame in enumerate(frames):
                 if frame.get("info") is None:
                     frame["info"] = info
-                reason, valid_frac, t_dec, t_cls, seg = classify_frame(frame)
-                row = {
-                    "pose": label, "condition": condition, "k": k,
-                    "stamp": frame["stamp"], "reason": reason or "none",
-                    "abort": 1 if reason else 0,
-                    "exact": 1 if (reason == condition) else 0,
-                    "cam_range_m": cam_range, "valid_frac": valid_frac,
-                    "t_decode_s": t_dec, "t_classify_s": t_cls,
-                }
-                if seg is not None:
-                    row.update(seg)
+                out = classify_frame(frame)
+                row = dict(out)
+                row.update({
+                    "pose": label, "regime": regime_of(cam_range),
+                    "condition": condition, "k": k,
+                    "stamp": frame["stamp"],
+                    "exact": 1 if (out["reason"] == condition) else 0,
+                    "cam_range_m": cam_range,
+                })
                 if truth is not None:
                     row["tru_lat_m"] = truth["pocket_opt"][0]
                     row["tru_range_m"] = truth["pocket_opt"][2]
@@ -196,6 +276,103 @@ def _reason_counts(rows):
     return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
 
 
+def _refusal_counts(rows):
+    """Which named C1 refusal stood behind each word, where there was one."""
+    counts = {}
+    for r in rows:
+        key = r.get("refused") or "(segmented)"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+
+
+def _by_regime(rows):
+    """Abort rate, words and refusals per range band.
+
+    The single figure `948 / 1073` hid the whole finding: the bands do
+    not behave alike and averaging them answers no question anyone asked.
+    """
+    out = {}
+    for name, _lo, _hi in REGIMES:
+        sub = [r for r in rows if r.get("regime") == name]
+        if not sub:
+            continue
+        hits = sum(r["abort"] for r in sub)
+        out[name] = {"n": len(sub), "abort": hits,
+                     "rate": hits / float(len(sub)),
+                     "reasons": _reason_counts(sub),
+                     "refusals": _refusal_counts(sub)}
+    unknown = [r for r in rows if r.get("regime") == "unknown"]
+    if unknown:
+        out["unknown"] = {"n": len(unknown),
+                          "abort": sum(r["abort"] for r in unknown),
+                          "rate": sum(r["abort"] for r in unknown)
+                          / float(len(unknown)),
+                          "reasons": _reason_counts(unknown),
+                          "refusals": _refusal_counts(unknown)}
+    return out
+
+
+def _read_feedback(plant, session):
+    """[(sim_t, state, num_retries)] from a dock session, or [].
+
+    `dock_bench.py record` writes `feedback.csv` beside its own session
+    under `evidence.dir`, stamped on the SAME sim clock the depth frames
+    carry (both nodes run with use_sim_time true), so the join key is
+    exact and needs no wall-clock correction.
+    """
+    if not session:
+        return []
+    path = os.path.join(_REPO, plant.cfg.s("evidence.dir"), session,
+                        "feedback.csv")
+    if not os.path.isfile(path):
+        return []
+    out = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                out.append((float(row["t_s"]), int(row["state"]),
+                            int(row["num_retries"])))
+    except (ValueError, KeyError, OSError):
+        return []
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+def _join_retries(rows, feedback):
+    """Stamp each frame with the retry count in force when it was taken.
+
+    Step function, held backwards: the docking server publishes feedback
+    on change, so the value at a frame's stamp is the last one published
+    at or before it. Frames taken before the first feedback message are
+    left blank rather than assumed to be retry 0 - the bench does not
+    know, and `retry_joined` says so.
+    """
+    if not feedback:
+        for row in rows:
+            row["retry_joined"] = 0
+        return 0
+    idx = 0
+    joined = 0
+    for row in sorted(rows, key=lambda r: r["stamp"]):
+        while idx + 1 < len(feedback) and feedback[idx + 1][0] <= row["stamp"]:
+            idx += 1
+        if feedback[idx][0] <= row["stamp"]:
+            row["dock_state"] = feedback[idx][1]
+            row["num_retries"] = feedback[idx][2]
+            row["retry_joined"] = 1
+            joined += 1
+        else:
+            row["retry_joined"] = 0
+    return joined
+
+
+def _pallet_moved_m(before, after):
+    """Planar distance the pallet travelled during a cycle, or None."""
+    if not before or not after:
+        return None
+    return math.hypot(after[0] - before[0], after[1] - before[1])
+
+
 def run_cycles(plant, cap, args, inject, P, dest):
     """Clean live approaches with the classifier streaming."""
     tools = os.path.join(_REPO, "m5_ver3", "tools")
@@ -203,6 +380,7 @@ def run_cycles(plant, cap, args, inject, P, dest):
     outcomes = []
     for c in range(args.cycles):
         inject.restore(plant)
+        pallet_before = plant.gz_model_pose(plant.pallet_name)
         print("--- cycle {} stage".format(c))
         stage = subprocess.run([sys.executable, os.path.join(tools, "dock_bench.py"), "stage"],
                                capture_output=True, text=True, timeout=120)
@@ -225,17 +403,17 @@ def run_cycles(plant, cap, args, inject, P, dest):
         crow = []
 
         def on_frame(frame, _c=c, _rows=crow):
-            reason, valid_frac, _t_dec, t_cls, _seg = classify_frame(frame)
+            out = classify_frame(frame)
             tr = frame.get("truth")
-            row = {"cycle": _c, "k": len(_rows), "stamp": frame["stamp"],
-                   "wall": frame["wall"] - t_start, "reason": reason or "none",
-                   "abort": 1 if reason else 0, "valid_frac": valid_frac,
-                   "t_classify_s": t_cls}
+            row = dict(out)
+            row.update({"cycle": _c, "k": len(_rows), "stamp": frame["stamp"],
+                        "wall": frame["wall"] - t_start})
             if tr:
                 from bench import geom
                 row["truth_x"], row["truth_y"] = tr[1][0], tr[1][1]
                 row["truth_yaw"] = geom.yaw_of_quat(*tr[2])
                 row["cam_range_m"] = plant.camera_range_of((tr[1][0], tr[1][1]))
+            row["regime"] = regime_of(row.get("cam_range_m"))
             _rows.append(row)
 
         def until(_p=proc, _t0=t_start):
@@ -252,20 +430,60 @@ def run_cycles(plant, cap, args, inject, P, dest):
         m_err = re.search(r"error(?:_code)?\s+(\d+)", text)
         m_session = re.search(r"session\s+(\S+)", text)
         m_truth = re.search(r"truth\s+([\d.]+)\s*m", text)
+        m_retries = re.search(r"retries\s+(\d+)", text)
+        session_name = m_session.group(1) if m_session else None
+        # The joins. Neither can be taken after the next cycle restores
+        # the world, so both are taken here, before inject.restore().
+        pallet_after = plant.gz_model_pose(plant.pallet_name)
+        moved = _pallet_moved_m(pallet_before, pallet_after)
+        readback_ok = 1 if (pallet_before and pallet_after) else 0
+        feedback = _read_feedback(plant, session_name)
+        joined = _join_retries(crow, feedback)
+        cycle_retries = int(m_retries.group(1)) if m_retries else None
+        clean_cycle = (readback_ok == 1
+                       and moved is not None and moved <= PALLET_MOVED_TOL_M)
+        for row in crow:
+            row["pallet_readback_ok"] = readback_ok
+            row["pallet_moved_m"] = moved
+            # COUNTABLE is the interim bar's population and nothing else:
+            # a frame on a retry-free stretch of a cycle whose pallet was
+            # read back and did not move. A frame the join could not
+            # reach is NOT countable - unknown is not zero.
+            row["countable"] = 1 if (clean_cycle
+                                     and row.get("retry_joined") == 1
+                                     and row.get("num_retries") == 0) else 0
         aborts = sum(r["abort"] for r in crow)
+        countable = [r for r in crow if r["countable"]]
+        c_aborts = sum(r["abort"] for r in countable)
         outcome = {"cycle": c, "stage_rc": 0, "record_rc": rc,
                    "success": (m_ok.group(1) == "True") if m_ok else None,
                    "error": int(m_err.group(1)) if m_err else None,
-                   "dock_session": m_session.group(1) if m_session else None,
+                   "dock_session": session_name,
                    "truth_m": float(m_truth.group(1)) if m_truth else None,
+                   "num_retries": cycle_retries,
+                   "feedback_rows": len(feedback), "retry_joined": joined,
+                   "pallet_readback_ok": readback_ok,
+                   "pallet_before": pallet_before, "pallet_after": pallet_after,
+                   "pallet_moved_m": moved, "clean_cycle": clean_cycle,
                    "classified": len(crow), "aborts": aborts,
                    "false_abort_rate": (aborts / len(crow)) if crow else None,
+                   "countable": len(countable), "countable_aborts": c_aborts,
+                   "countable_false_abort_rate": (
+                       (c_aborts / len(countable)) if countable else None),
                    "wall_s": time.time() - t_start,
-                   "reasons": _reason_counts(crow)}
+                   "reasons": _reason_counts(crow),
+                   "refusals": _refusal_counts(crow),
+                   "by_regime": _by_regime(crow)}
         outcomes.append(outcome)
         rows.extend(crow)
-        print("    record rc={} success={} error={} classified={} aborts={} reasons={}".format(
-            rc, outcome["success"], outcome["error"], len(crow), aborts, outcome["reasons"]))
+        print("    record rc={} success={} error={} retries={} classified={} "
+              "aborts={} reasons={}".format(
+                  rc, outcome["success"], outcome["error"], cycle_retries,
+                  len(crow), aborts, outcome["reasons"]))
+        print("    pallet moved {} m readback_ok={} clean_cycle={} | countable "
+              "{} aborts {} false-abort {}".format(
+                  _fmt(moved, 4), readback_ok, clean_cycle, len(countable),
+                  c_aborts, _fmt(outcome["countable_false_abort_rate"], 3)))
     inject.restore(plant)
     return rows, outcomes
 
@@ -310,12 +528,45 @@ def summarise(static_rows, cycle_rows, outcomes, inject):
                 confusion[cond][r["reason"]] = confusion[cond].get(r["reason"], 0) + 1
     cyc_n = len(cycle_rows)
     cyc_aborts = sum(r["abort"] for r in cycle_rows)
+    # The interim bar's population, stated as a population and not as a
+    # filter applied after the fact: retry-free frames of a cycle whose
+    # pallet was read back and did not move. Everything else is reported
+    # beside it, never folded into it.
+    countable = [r for r in cycle_rows if r.get("countable")]
+    cnt_aborts = sum(r["abort"] for r in countable)
+    retry_rows = [r for r in cycle_rows
+                  if r.get("retry_joined") == 1 and r.get("num_retries")]
+    unjoined = [r for r in cycle_rows if r.get("retry_joined") != 1]
+    moved_rows = [r for r in cycle_rows if r.get("countable") == 0
+                  and r.get("retry_joined") == 1
+                  and not r.get("num_retries")]
     return {
         "static_by_pose": table, "static_overall": overall, "confusion": confusion,
+        "static_by_regime": _by_regime(
+            [r for r in static_rows if r["condition"] == "clean"]),
+        "static_refusals": _refusal_counts(static_rows),
         "cycles": outcomes,
         "cycle_overall": {"classified": cyc_n, "aborts": cyc_aborts,
                           "false_abort_rate": (cyc_aborts / cyc_n) if cyc_n else None,
-                          "reasons": _reason_counts(cycle_rows)},
+                          "reasons": _reason_counts(cycle_rows),
+                          "refusals": _refusal_counts(cycle_rows)},
+        "cycle_by_regime": _by_regime(cycle_rows),
+        "cycle_countable": {
+            "classified": len(countable), "aborts": cnt_aborts,
+            "false_abort_rate": (cnt_aborts / len(countable)) if countable else None,
+            "reasons": _reason_counts(countable),
+            "refusals": _refusal_counts(countable),
+            "by_regime": _by_regime(countable),
+            "definition": ("num_retries == 0, joined from the dock session's "
+                           "feedback.csv, on a cycle whose pallet was read "
+                           "back before and after and moved <= {} m".format(
+                               PALLET_MOVED_TOL_M))},
+        "cycle_excluded": {
+            "on_a_retry": len(retry_rows),
+            "retry_unjoined": len(unjoined),
+            "pallet_moved_or_unread": len(moved_rows),
+            "note": ("reported, never folded in: a frame whose retry count "
+                     "the bench could not reach is unknown, not zero")},
         "t_classify_s": geom.summarise([r["t_classify_s"] for r in static_rows + cycle_rows]),
     }
 
@@ -350,16 +601,55 @@ def write_summary_txt(path, session, summ, plant, args, inject):
         lines.append("{:<18}".format(cond) + "".join(
             "{:>17}".format(summ["confusion"][cond].get(c, 0)) for c in cols))
     lines.append("")
+    lines.append("named C1 refusals behind the static words: {}".format(
+        summ.get("static_refusals")))
+    lines.append("clean static frames by range band: {}".format(
+        {k: "{}/{}".format(v["abort"], v["n"])
+         for k, v in summ.get("static_by_regime", {}).items()}))
+    lines.append("")
     lines.append("clean live cycles (dock_bench.py record --from-staging):")
     for o in summ["cycles"]:
-        lines.append("  cycle {} plugin success={} error={} truth={} m | classified {} aborts {} "
-                     "false-abort {} | reasons {}".format(
-                         o["cycle"], o.get("success"), o.get("error"), _fmt(o.get("truth_m")),
+        lines.append("  cycle {} plugin success={} error={} retries={} truth={} m "
+                     "| classified {} aborts {} false-abort {} | reasons {}".format(
+                         o["cycle"], o.get("success"), o.get("error"),
+                         o.get("num_retries"), _fmt(o.get("truth_m")),
                          o.get("classified"), o.get("aborts"),
                          _fmt(o.get("false_abort_rate"), 3), o.get("reasons")))
+        lines.append("           pallet readback_ok={} moved={} m clean_cycle={} "
+                     "| retries joined {}/{} from {} feedback rows".format(
+                         o.get("pallet_readback_ok"), _fmt(o.get("pallet_moved_m")),
+                         o.get("clean_cycle"), o.get("retry_joined"),
+                         o.get("classified"), o.get("feedback_rows")))
+        lines.append("           countable {} aborts {} false-abort {}".format(
+            o.get("countable"), o.get("countable_aborts"),
+            _fmt(o.get("countable_false_abort_rate"), 3)))
     co = summ["cycle_overall"]
     lines.append("  overall classified {} aborts {} false-abort {}".format(
         co["classified"], co["aborts"], _fmt(co["false_abort_rate"], 3)))
+    lines.append("  refusals behind those words: {}".format(co.get("refusals")))
+    lines.append("")
+    lines.append("live frames by range band (all cycles):")
+    for band, cell in summ.get("cycle_by_regime", {}).items():
+        lines.append("  {:<10} {:>4}/{:<4} = {}  reasons {}".format(
+            band, cell["abort"], cell["n"], _fmt(cell["rate"], 3),
+            cell["reasons"]))
+        lines.append("  {:<10} refusals {}".format("", cell["refusals"]))
+    lines.append("")
+    cc = summ.get("cycle_countable", {})
+    lines.append("INTERIM BAR POPULATION - {}".format(cc.get("definition")))
+    lines.append("  classified {} aborts {} false-abort {}".format(
+        cc.get("classified"), cc.get("aborts"),
+        _fmt(cc.get("false_abort_rate"), 3)))
+    lines.append("  reasons {}".format(cc.get("reasons")))
+    lines.append("  refusals {}".format(cc.get("refusals")))
+    lines.append("  by band {}".format(
+        {k: "{}/{}".format(v["abort"], v["n"])
+         for k, v in cc.get("by_regime", {}).items()}))
+    ex = summ.get("cycle_excluded", {})
+    lines.append("  excluded and reported separately: on a retry {}, retry "
+                 "count unjoined {}, pallet moved or unread {}".format(
+                     ex.get("on_a_retry"), ex.get("retry_unjoined"),
+                     ex.get("pallet_moved_or_unread")))
     lines.append("")
     t = summ["t_classify_s"]
     lines.append("classify latency s: median {} max {} n {}".format(
