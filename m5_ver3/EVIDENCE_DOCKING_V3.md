@@ -555,5 +555,3 @@ What comes next is the owner's call: M6 fleet integration or the
 challenge phase. F5's load-bearing measurements are in this file.
 Nothing outside `m5_ver3/` was edited. `warehouse_ver3.sdf` was not
 edited. PLCSIM was not opened.
-
-

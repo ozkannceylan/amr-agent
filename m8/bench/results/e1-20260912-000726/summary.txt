@@ -6,7 +6,7 @@ frames per pose: 30  ranges: staging,1.5,1.0
 pose                n  obs   cam_m face%roi  rms_lat  rms_rng   rms_2d  rms_yaw  rms_map
 staging            30   30   2.245      2.9   0.0018   0.0064   0.0067   0.0012   0.0564
 approach_1.50m     30   30   1.500      4.9   0.0036   0.0070   0.0079   0.0015   0.0922
-approach_1.00m     30    0   1.000      6.6                                             
+approach_1.00m     30    0   1.000      6.6
 
 [staging] truth lateral -0.4000 range 2.4637 yaw -0.0000 | chain check (depth at pocket px - truth range) mean 0.0001 max|.| 0.0058 n 30 | observe median 0.048 s
       plane C1 fitted on 30/30 frames: c (range on axis) mean 2.5800 m vs truth 2.4637 (err mean 0.1163), slope a mean -0.0025 b mean 1.3267, points n median 348
@@ -15,4 +15,4 @@ approach_1.00m     30    0   1.000      6.6
       plane C1 fitted on 30/30 frames: c (range on axis) mean 1.7443 m vs truth 1.8185 (err mean -0.0743), slope a mean -0.0025 b mean 0.8663, points n median 544
       est lateral mean -0.3964 range mean 1.8115 yaw mean -0.0014 | errors: lat mean 0.0036 range mean -0.0070 2d max 0.0087 yaw max|.| 0.0026
 [approach_1.00m] truth lateral -0.4000 range 1.3855 yaw -0.0000 | chain check (depth at pocket px - truth range) mean -0.0009 max|.| 0.0080 n 30 | observe median 0.052 s
-      plane C1 fitted on 0/30 frames: c (range on axis) mean  m vs truth 1.3855 (err mean ), slope a mean  b mean , points n median 
+      plane C1 fitted on 0/30 frames: c (range on axis) mean  m vs truth 1.3855 (err mean ), slope a mean  b mean , points n median
