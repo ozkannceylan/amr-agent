@@ -97,6 +97,10 @@ REGIMES = (("staging", 2.0, float("inf")),
 # gz readback jitter is millimetres; 0.02 m is an order over it and well
 # under the 0.16 m pocket it would take to matter.
 PALLET_MOVED_TOL_M = 0.02
+# How often the pallet is read back WHILE a cycle runs. `gz model -p` is
+# a subprocess of about 0.1 s, so once a second costs a tenth of the
+# stream and buys a per-frame answer instead of a per-cycle one.
+PALLET_WATCH_S = 1.0
 
 # THE PAIRED SECOND CLASSIFICATION - the same depth buffer, classified
 # again AS THE SHADOW NODES NOW RUN IT: the truck's own forks masked out
@@ -111,7 +115,8 @@ PALLET_MOVED_TOL_M = 0.02
 # is only a finding if the input was there and fresh.
 WIRED_FIELDS = (
     "mast_q_m", "mast_stamp", "mask_stale",
-    "tag_u", "tag_v", "tag_range_m", "tag_z_m", "tag_stale",
+    "tag_u", "tag_v", "tag_range_m", "tag_face_range_m", "tag_lateral_m",
+    "tag_z_m", "tag_stale",
     "reason_wired", "abort_wired", "seg_ok_wired", "refused_wired",
     "seg_width_wired_m", "seg_yaw_wired_rad", "t_classify_wired_s",
 )
@@ -251,6 +256,8 @@ def classify_frame(frame, self_mask=None, also_wired=False):
             out["tag_u"] = tag.u
             out["tag_v"] = tag.v
             out["tag_range_m"] = tag.range_m
+            out["tag_face_range_m"] = tag.face_range_m
+            out["tag_lateral_m"] = tag.lateral_m
             out["tag_z_m"] = tag.z
             out["tag_stale"] = 1 if tag.is_stale(df.sim_stamp) else 0
         tag_kw = kwargs_for(tag, df.sim_stamp)
@@ -446,10 +453,20 @@ def _join_retries(rows, feedback):
 
 
 def _pallet_moved_m(before, after):
-    """Planar distance the pallet travelled during a cycle, or None."""
+    """Planar distance between two pallet readbacks, or None."""
     if not before or not after:
         return None
     return math.hypot(after[0] - before[0], after[1] - before[1])
+
+
+def moved_from_design(plant, reference):
+    """How far the pallet is from where the cycle started, right now.
+
+    `reference` is the readback taken after `inject.restore`, so this is
+    displacement from the staged pose and not from the design constant -
+    a restore that landed a millimetre out is not movement.
+    """
+    return _pallet_moved_m(reference, plant.gz_model_pose(plant.pallet_name))
 
 
 def run_cycles(plant, cap, args, inject, P, dest):
@@ -493,10 +510,27 @@ def run_cycles(plant, cap, args, inject, P, dest):
                 row["truth_yaw"] = geom.yaw_of_quat(*tr[2])
                 row["cam_range_m"] = plant.camera_range_of((tr[1][0], tr[1][1]))
             row["regime"] = regime_of(row.get("cam_range_m"))
+            row["pallet_moved_m"] = watch["moved"]
             _rows.append(row)
 
-        def until(_p=proc, _t0=t_start):
-            return _p.poll() is not None or (time.time() - _t0) > CYCLE_TIMEOUT_S
+        # WHERE THE PALLET IS, DURING THE CYCLE AND NOT ONLY AT ITS ENDS.
+        # Session e3-20260912-181548 measured the pallet 0.4715 m from
+        # where cycle 0 started, at the end of it - the dock drives the
+        # forks INTO the pallet, so a clean cycle does not end with a
+        # clean world. Read at the ends only, that made every frame of
+        # the cycle uncountable, including the whole approach taken
+        # before anything touched anything. `gz model -p` is a
+        # subprocess, so it runs on a timer and the frames between two
+        # readings carry the last one - held backwards, the same rule as
+        # the retry join.
+        watch = {"t": 0.0, "moved": moved_from_design(plant, pallet_before)}
+
+        def until(_p=proc, _t0=t_start, _w=watch):
+            now = time.time()
+            if now - _w["t"] >= PALLET_WATCH_S:
+                _w["t"] = now
+                _w["moved"] = moved_from_design(plant, pallet_before)
+            return _p.poll() is not None or (now - _t0) > CYCLE_TIMEOUT_S
 
         cap.stream(on_frame, until)
         if proc.poll() is None:
@@ -523,12 +557,19 @@ def run_cycles(plant, cap, args, inject, P, dest):
                        and moved is not None and moved <= PALLET_MOVED_TOL_M)
         for row in crow:
             row["pallet_readback_ok"] = readback_ok
-            row["pallet_moved_m"] = moved
+            if row.get("pallet_moved_m") is None:
+                row["pallet_moved_m"] = moved
             # COUNTABLE is the interim bar's population and nothing else:
             # a frame on a retry-free stretch of a cycle whose pallet was
             # read back and did not move. A frame the join could not
             # reach is NOT countable - unknown is not zero.
-            row["countable"] = 1 if (clean_cycle
+            # COUNTABLE IS PER FRAME, not per cycle: a dock that shoves
+            # the pallet at contact does not retrospectively contaminate
+            # the approach that preceded it.
+            row_moved = row.get("pallet_moved_m")
+            row["countable"] = 1 if (readback_ok == 1
+                                     and row_moved is not None
+                                     and row_moved <= PALLET_MOVED_TOL_M
                                      and row.get("retry_joined") == 1
                                      and row.get("num_retries") == 0) else 0
         aborts = sum(r["abort"] for r in crow)
@@ -618,7 +659,9 @@ def summarise(static_rows, cycle_rows, outcomes, inject):
     unjoined = [r for r in cycle_rows if r.get("retry_joined") != 1]
     moved_rows = [r for r in cycle_rows if r.get("countable") == 0
                   and r.get("retry_joined") == 1
-                  and not r.get("num_retries")]
+                  and not r.get("num_retries")
+                  and (r.get("pallet_moved_m") is None
+                       or r.get("pallet_moved_m") > PALLET_MOVED_TOL_M)]
     return {
         "static_by_pose": table, "static_overall": overall, "confusion": confusion,
         "static_by_regime": _by_regime(
@@ -637,8 +680,9 @@ def summarise(static_rows, cycle_rows, outcomes, inject):
             "refusals": _refusal_counts(countable),
             "by_regime": _by_regime(countable),
             "definition": ("num_retries == 0, joined from the dock session's "
-                           "feedback.csv, on a cycle whose pallet was read "
-                           "back before and after and moved <= {} m".format(
+                           "feedback.csv, on a frame whose pallet was read "
+                           "back and was within {} m of where the cycle "
+                           "started, AT THAT FRAME".format(
                                PALLET_MOVED_TOL_M))},
         "cycle_excluded": {
             "on_a_retry": len(retry_rows),

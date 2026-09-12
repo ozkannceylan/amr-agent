@@ -42,16 +42,24 @@ def proposal_json_from_depth(depths, width, height, sim_stamp,
         fx=DEFAULT_FX if fx is None else fx,
         fy=DEFAULT_FY if fy is None else fy,
         cx=cx, cy=cy)
-    # C1 takes the tag in FOUR places and they are four different
-    # quantities: (tag_u, tag_v) order the candidate blobs, `tag_z` is
-    # the OPTICAL DEPTH the pose delta is measured against, and
-    # `expected_range` is the HORIZONTAL distance that narrows the range
-    # window. Passing the depth where the horizontal figure belongs is a
-    # 15 % error on this rig's mount, so `TagTarget` carries both.
+    # C1 takes the tag in four places and gets ONE of them here, for the
+    # reason `m8_nodes.tag_target.as_kwargs` sets out: this rig's tag is
+    # the DOCK MARKER on the bay back panel, not a pallet tag.
+    #
+    #   expected_range  YES - the marker range less the 0.82 m a staged
+    #                   pallet stands in front of the panel. This is the
+    #                   window, and narrowing it also puts the truck's
+    #                   own forks outside it at staging and at 1.5 m.
+    #   tag_u, tag_v    NO - they would seed the candidate choice onto
+    #                   the marker board, which is 0.73 m above the
+    #                   pallet and a different object.
+    #   tag_z           NO - it is the depth of the MARKER, so a pose
+    #                   delta measured against it would read 0.85 m off
+    #                   on every frame. The delta stays against the
+    #                   fitted face, as it was.
     tag_kw = {}
     if tag is not None and not tag.is_stale(sim_stamp):
-        tag_kw = {"tag_u": tag.u, "tag_v": tag.v, "tag_z": tag.z,
-                  "expected_range": tag.range_m}
+        tag_kw = {"expected_range": tag.face_range_m}
     proposal = propose_pocket(frame, self_mask=self_mask, **tag_kw)
     if proposal is None:
         return None

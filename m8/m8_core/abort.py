@@ -207,7 +207,8 @@ def classify(frame: DepthFrame,
              target_u: Optional[float] = None,
              target_v: Optional[float] = None,
              expected_range: Optional[float] = None,
-             self_mask=None) -> Optional[str]:
+             self_mask=None,
+             target_lateral_m: Optional[float] = None) -> Optional[str]:
     """Return an ABORT_REASONS member, or None if the frame looks clean.
 
     The `target_*` and `expected_range` arguments are the live tag's
@@ -271,8 +272,24 @@ def classify(frame: DepthFrame,
     z = seg.face.depth_at(frame.x_of(u_mid), frame.y_of(v_mid))
     if z is None:
         return None if clipped else "pocket_blocked"
-    tu = frame.cx if target_u is None else float(target_u)
-    lateral = (u_mid - tu) / frame.fx * z
+    if target_lateral_m is None:
+        tu = frame.cx if target_u is None else float(target_u)
+        lateral = (u_mid - tu) / frame.fx * z
+    else:
+        # A REFERENCE COLUMN IS ONLY A REFERENCE AT ONE DEPTH. This rig's
+        # AprilTag is the DOCK MARKER on the bay's back panel, 0.85 m
+        # behind the pallet face, and the camera is mounted 0.40 m off
+        # the vehicle centreline - so the marker and the pallet sit on
+        # one line in the world and project to DIFFERENT columns,
+        # further apart the closer the truck gets (measured on the plant
+        # 2026-09-12: 12 px at staging, 27 at 1.5 m, 57 at 1.0 m).
+        #
+        # In METRES there is no such drift: the tag's own optical X was
+        # -0.4019 / -0.3979 / -0.3994 m at those three poses, which is
+        # the mount offset and nothing else. So a caller that knows the
+        # reference in metres passes it in metres, and the subtraction
+        # happens where the depth is already known.
+        lateral = (u_mid - frame.cx) / frame.fx * z - float(target_lateral_m)
     if abs(lateral) > SHIFTED_LATERAL_M:
         return None if clipped else "pallet_shifted"
     return None
@@ -284,9 +301,11 @@ def propose(frame: DepthFrame,
             target_u: Optional[float] = None,
             target_v: Optional[float] = None,
             expected_range: Optional[float] = None,
-            self_mask=None) -> Optional[object]:
+            self_mask=None,
+            target_lateral_m: Optional[float] = None) -> Optional[object]:
     reason = classify(frame, target_u=target_u, target_v=target_v,
-                      expected_range=expected_range, self_mask=self_mask)
+                      expected_range=expected_range, self_mask=self_mask,
+                      target_lateral_m=target_lateral_m)
     if reason is None:
         return None
     return make_proposal(

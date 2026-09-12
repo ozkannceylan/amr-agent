@@ -81,6 +81,90 @@ def test_the_horizontal_range_is_not_the_optical_depth():
     assert abs(target.z - target.range_m) > 0.25
 
 
+def test_the_marker_is_behind_the_pallet_and_the_window_says_so():
+    """The plant regression this constant exists because of.
+
+    Session e3-20260912-181548: `expected_range` was the range to the
+    MARKER, the window opened around the bay back panel, the pallet fell
+    outside it, and 57 clean frames turned into `pallet_absent`. Every
+    one of the 57 carried a tag; not one carried only the self-mask.
+    """
+    from m8_nodes.tag_target import FACE_AHEAD_OF_MARKER_M
+    # The constant is config, not the bench reading: pallet depth 0.80 m
+    # plus wall clearance 0.02 m.
+    assert FACE_AHEAD_OF_MARKER_M == pytest.approx(0.80 + 0.02)
+    marker = TagTarget(u=271.9, v=87.0, z=2.818, range_m=3.1055,
+                       lateral_m=-0.4019, stamp=1.0)
+    assert marker.face_range_m == pytest.approx(3.1055 - 0.82)
+    # The plant staged that pose at a camera-to-face range of 2.2452 m.
+    # What is left is the residual, and it is an order inside the window.
+    assert abs(marker.face_range_m - 2.2452) < 0.05
+    lo, hi = range_window(marker.face_range_m)
+    assert lo <= 2.2452 <= hi
+    # The uncorrected marker range would have excluded the pallet.
+    lo_bad, hi_bad = range_window(marker.range_m)
+    assert not (lo_bad <= 2.2452 <= hi_bad)
+
+
+def test_the_window_from_the_tag_also_excludes_the_trucks_own_forks():
+    """A second, independent answer to the fork problem - at range.
+
+    The tines reach 0.975 m. At staging the tag-derived window starts at
+    1.885 m, so the tines are outside it before any mask is applied. At
+    1.0 m they are inside it again, which is exactly where the self-mask
+    is needed and why the two are not alternatives.
+    """
+    from m8_core.selfmask import TINE_REACH_M
+    staging = TagTarget(1, 1, 2.8, range_m=3.1055, lateral_m=-0.40,
+                        stamp=1.0)
+    lo, _hi = range_window(staging.face_range_m)
+    assert lo > TINE_REACH_M
+    close = TagTarget(1, 1, 1.7, range_m=1.8583, lateral_m=-0.40, stamp=1.0)
+    lo_close, _ = range_window(close.face_range_m)
+    assert lo_close < TINE_REACH_M
+
+
+def test_the_pixel_column_is_not_passed_and_the_metre_reference_is():
+    """The marker is a DIFFERENT OBJECT, 0.73 m above the pallet.
+
+    Seeding `segment` on its pixel ranks the marker board first. The
+    lateral reference in METRES has no such problem - it is a distance
+    across the axis, not a claim about which blob to look at.
+    """
+    target = TagTarget(u=271.9, v=87.0, z=2.818, range_m=3.1055,
+                       lateral_m=-0.4019, stamp=1.0)
+    kwargs = target.as_kwargs()
+    assert set(kwargs) == {"expected_range", "target_lateral_m"}
+    assert "target_u" not in kwargs and "target_v" not in kwargs
+    assert kwargs["target_lateral_m"] == pytest.approx(-0.4019)
+
+
+def test_a_metre_reference_does_not_drift_with_range_where_a_column_does():
+    """The measurement that forced the change, reproduced offline.
+
+    A reference column is only a reference at one depth. The plant read
+    the marker 12 px from the pallet centre at staging, 27 at 1.5 m and
+    57 at 1.0 m - the same two objects, drifting apart in pixels as the
+    truck closed in. In metres the marker sat at -0.4019 / -0.3979 /
+    -0.3994 m: the mount offset, and no drift.
+    """
+    # ONE number in metres, correct at every range.
+    for distance in (scenes.STAGING_M, scenes.APPROACH_M, scenes.CLOSE_M):
+        frame, _scene = scenes.clean(distance)
+        assert classify(frame, target_lateral_m=-0.40) is None
+
+    # ONE column in pixels, correct at exactly one range. Taken at
+    # staging and carried to 1.5 m it is off by a real distance on the
+    # floor - and this scene is the KIND case, because the pallet is its
+    # own reference here. On the plant the reference was 0.85 m further
+    # away than the pallet, which is what turned 12 px into 57.
+    at_staging, _v = scenes.px_of(*scenes.clean(scenes.STAGING_M))
+    frame, scene = scenes.clean(scenes.APPROACH_M)
+    at_approach, _v2 = scenes.px_of(frame, scene)
+    drift_m = abs(at_staging - at_approach) / frame.fx * scene.pocket_centre()[2]
+    assert drift_m > 0.05
+
+
 def test_the_tag_projects_through_the_live_intrinsics():
     target = from_transforms((0.20, -0.10, 2.0), (-3.0, 0.0, 0.2),
                              (-0.9, 0.4, 1.1), FX, FY, CX, CY, stamp=1.0)
