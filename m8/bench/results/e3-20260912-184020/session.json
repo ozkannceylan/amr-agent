@@ -1,0 +1,959 @@
+{
+  "algorithm": "m8_core.abort.classify (classical thresholds), unmodified",
+  "bench": "e3_abort",
+  "cam_mount": [
+    -0.9,
+    0.4,
+    1.1,
+    0.0,
+    0.5235988,
+    3.1415927
+  ],
+  "conditions": [
+    {
+      "base": [
+        7.0,
+        6.575,
+        1.5707963267948966
+      ],
+      "condition": "clean",
+      "n_frames": 30,
+      "pose": "staging",
+      "seed_map": [
+        -24.090357730869354,
+        3.2008777469301037,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "clean",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        }
+      },
+      "truck6": [
+        7.0,
+        6.57519,
+        -1e-06,
+        -0.0,
+        -1e-06,
+        1.57079
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          0.0,
+          -0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        6.575,
+        1.5707963267948966
+      ],
+      "condition": "pallet_absent",
+      "n_frames": 30,
+      "pose": "staging",
+      "seed_map": [
+        -24.090357730869354,
+        3.2008777469301037,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "pallet_absent",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        },
+        "set_pose_ok": true
+      },
+      "truck6": [
+        7.0,
+        6.57519,
+        -1e-06,
+        -0.0,
+        -1e-06,
+        1.57079
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          -17.0,
+          10.0,
+          0.072,
+          -0.0,
+          -0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        6.575,
+        1.5707963267948966
+      ],
+      "condition": "pallet_rotated",
+      "n_frames": 30,
+      "pose": "staging",
+      "seed_map": [
+        -24.090357730869354,
+        3.2008777469301037,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "pallet_rotated",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        },
+        "set_pose_ok": true
+      },
+      "truck6": [
+        7.0,
+        6.57519,
+        -1e-06,
+        -0.0,
+        -1e-06,
+        1.57079
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          0.0,
+          0.0,
+          1.9208
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        6.575,
+        1.5707963267948966
+      ],
+      "condition": "pallet_shifted",
+      "n_frames": 30,
+      "pose": "staging",
+      "seed_map": [
+        -24.090357730869354,
+        3.2008777469301037,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "pallet_shifted",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        },
+        "set_pose_ok": true
+      },
+      "truck6": [
+        7.0,
+        6.57519,
+        -1e-06,
+        -0.0,
+        -1e-06,
+        1.57079
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          6.7,
+          3.03,
+          0.072,
+          0.0,
+          0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        6.575,
+        1.5707963267948966
+      ],
+      "condition": "pocket_blocked",
+      "n_frames": 30,
+      "pose": "staging",
+      "seed_map": [
+        -24.090357730869354,
+        3.2008777469301037,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "box_pose": {
+          "x": 7.0,
+          "y": 3.4899999999999998,
+          "yaw": 1.5707963267948966,
+          "z": 0.06
+        },
+        "condition": "pocket_blocked",
+        "create_ok": true,
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        }
+      },
+      "truck6": [
+        7.0,
+        6.57519,
+        -1e-06,
+        -0.0,
+        -1e-06,
+        1.57079
+      ],
+      "world": {
+        "m8_pocket_block": [
+          7.0,
+          3.49,
+          0.06,
+          0.0,
+          -0.0,
+          1.5708
+        ],
+        "m8_stringer": null,
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          -0.0,
+          0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        6.575,
+        1.5707963267948966
+      ],
+      "condition": "stringer_in_path",
+      "n_frames": 30,
+      "pose": "staging",
+      "seed_map": [
+        -24.090357730869354,
+        3.2008777469301037,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "box_pose": {
+          "x": 7.0,
+          "y": 4.029999999999999,
+          "yaw": 1.5707963267948966,
+          "z": 0.03
+        },
+        "condition": "stringer_in_path",
+        "create_ok": true,
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        }
+      },
+      "truck6": [
+        7.0,
+        6.57519,
+        -1e-06,
+        -0.0,
+        -1e-06,
+        1.57079
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": [
+          7.0,
+          4.03,
+          0.03,
+          0.0,
+          -0.0,
+          1.5708
+        ],
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          -0.0,
+          0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.83,
+        1.5707963267948966
+      ],
+      "condition": "clean",
+      "n_frames": 30,
+      "pose": "approach_1.50m",
+      "seed_map": [
+        -24.092789596965005,
+        3.9458737778103314,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "clean",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        }
+      },
+      "truck6": [
+        7.0,
+        5.82962,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          -0.0,
+          0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.83,
+        1.5707963267948966
+      ],
+      "condition": "pallet_absent",
+      "n_frames": 30,
+      "pose": "approach_1.50m",
+      "seed_map": [
+        -24.092789596965005,
+        3.9458737778103314,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "pallet_absent",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        },
+        "set_pose_ok": true
+      },
+      "truck6": [
+        7.0,
+        5.82962,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          -17.0,
+          10.0,
+          0.072,
+          -0.0,
+          -0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.83,
+        1.5707963267948966
+      ],
+      "condition": "pallet_rotated",
+      "n_frames": 30,
+      "pose": "approach_1.50m",
+      "seed_map": [
+        -24.092789596965005,
+        3.9458737778103314,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "pallet_rotated",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        },
+        "set_pose_ok": true
+      },
+      "truck6": [
+        7.0,
+        5.82962,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          0.0,
+          0.0,
+          1.9208
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.83,
+        1.5707963267948966
+      ],
+      "condition": "pallet_shifted",
+      "n_frames": 30,
+      "pose": "approach_1.50m",
+      "seed_map": [
+        -24.092789596965005,
+        3.9458737778103314,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "pallet_shifted",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        },
+        "set_pose_ok": true
+      },
+      "truck6": [
+        7.0,
+        5.82962,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          6.7,
+          3.03,
+          0.072,
+          -0.0,
+          0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.83,
+        1.5707963267948966
+      ],
+      "condition": "pocket_blocked",
+      "n_frames": 30,
+      "pose": "approach_1.50m",
+      "seed_map": [
+        -24.092789596965005,
+        3.9458737778103314,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "box_pose": {
+          "x": 7.0,
+          "y": 3.4899999999999998,
+          "yaw": 1.5707963267948966,
+          "z": 0.06
+        },
+        "condition": "pocket_blocked",
+        "create_ok": true,
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        }
+      },
+      "truck6": [
+        7.0,
+        5.82962,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": [
+          7.0,
+          3.49,
+          0.06,
+          0.0,
+          -0.0,
+          1.5708
+        ],
+        "m8_stringer": null,
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          -0.0,
+          0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.83,
+        1.5707963267948966
+      ],
+      "condition": "stringer_in_path",
+      "n_frames": 30,
+      "pose": "approach_1.50m",
+      "seed_map": [
+        -24.092789596965005,
+        3.9458737778103314,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "box_pose": {
+          "x": 7.0,
+          "y": 4.029999999999999,
+          "yaw": 1.5707963267948966,
+          "z": 0.03
+        },
+        "condition": "stringer_in_path",
+        "create_ok": true,
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        }
+      },
+      "truck6": [
+        7.0,
+        5.82962,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": [
+          7.0,
+          4.03,
+          0.03,
+          0.0,
+          -0.0,
+          1.5708
+        ],
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          -0.0,
+          0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.33,
+        1.5707963267948966
+      ],
+      "condition": "clean",
+      "n_frames": 30,
+      "pose": "approach_1.00m",
+      "seed_map": [
+        -24.09442172186142,
+        4.445871113971558,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "clean",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        }
+      },
+      "truck6": [
+        7.0,
+        5.32997,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          -0.0,
+          0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.33,
+        1.5707963267948966
+      ],
+      "condition": "pallet_absent",
+      "n_frames": 30,
+      "pose": "approach_1.00m",
+      "seed_map": [
+        -24.09442172186142,
+        4.445871113971558,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "pallet_absent",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        },
+        "set_pose_ok": true
+      },
+      "truck6": [
+        7.0,
+        5.32997,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          -17.0,
+          10.0,
+          0.072,
+          0.0,
+          -0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.33,
+        1.5707963267948966
+      ],
+      "condition": "pallet_rotated",
+      "n_frames": 30,
+      "pose": "approach_1.00m",
+      "seed_map": [
+        -24.09442172186142,
+        4.445871113971558,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "pallet_rotated",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        },
+        "set_pose_ok": true
+      },
+      "truck6": [
+        7.0,
+        5.32997,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          0.0,
+          0.0,
+          1.9208
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.33,
+        1.5707963267948966
+      ],
+      "condition": "pallet_shifted",
+      "n_frames": 30,
+      "pose": "approach_1.00m",
+      "seed_map": [
+        -24.09442172186142,
+        4.445871113971558,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "condition": "pallet_shifted",
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        },
+        "set_pose_ok": true
+      },
+      "truck6": [
+        7.0,
+        5.32997,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": null,
+        "pallet": [
+          6.7,
+          3.03,
+          0.072,
+          0.0,
+          0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.33,
+        1.5707963267948966
+      ],
+      "condition": "pocket_blocked",
+      "n_frames": 30,
+      "pose": "approach_1.00m",
+      "seed_map": [
+        -24.09442172186142,
+        4.445871113971558,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "box_pose": {
+          "x": 7.0,
+          "y": 3.4899999999999998,
+          "yaw": 1.5707963267948966,
+          "z": 0.06
+        },
+        "condition": "pocket_blocked",
+        "create_ok": true,
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        }
+      },
+      "truck6": [
+        7.0,
+        5.32997,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": [
+          7.0,
+          3.49,
+          0.06,
+          0.0,
+          -0.0,
+          1.5708
+        ],
+        "m8_stringer": null,
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          0.0,
+          -0.0,
+          1.5708
+        ]
+      }
+    },
+    {
+      "base": [
+        7.0,
+        5.33,
+        1.5707963267948966
+      ],
+      "condition": "stringer_in_path",
+      "n_frames": 30,
+      "pose": "approach_1.00m",
+      "seed_map": [
+        -24.09442172186142,
+        4.445871113971558,
+        -1.5675320712051035
+      ],
+      "staged": {
+        "box_pose": {
+          "x": 7.0,
+          "y": 4.029999999999999,
+          "yaw": 1.5707963267948966,
+          "z": 0.03
+        },
+        "condition": "stringer_in_path",
+        "create_ok": true,
+        "design": {
+          "x": 7.0,
+          "y": 3.03,
+          "yaw": 1.5707963267948966,
+          "z": 0.072
+        }
+      },
+      "truck6": [
+        7.0,
+        5.32997,
+        -1e-06,
+        0.0,
+        1e-06,
+        1.5708
+      ],
+      "world": {
+        "m8_pocket_block": null,
+        "m8_stringer": [
+          7.0,
+          4.03,
+          0.03,
+          0.0,
+          -0.0,
+          1.5708
+        ],
+        "pallet": [
+          7.0,
+          3.03,
+          0.072,
+          0.0,
+          -0.0,
+          1.5708
+        ]
+      }
+    }
+  ],
+  "environment": {
+    "gallium_driver": "",
+    "gl_renderer_last": "18:38:50: GL_RENDERER = D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)",
+    "gz_partition": "m5v3",
+    "gz_sim": "Gazebo Sim, version 8.11.0",
+    "host": "ozkannotebook",
+    "kernel": "5.15.167.4-microsoft-standard-WSL2",
+    "nvidia_smi": "NVIDIA GeForce RTX 4050 Laptop GPU, 572.16",
+    "python": "3.12.3",
+    "registration": {
+      "path": "m5_ver3/maps/warehouse_v3/registration.yaml",
+      "residual_max_m": 0.117891,
+      "residual_rms_m": 0.029052,
+      "t_x_m": -17.111857467,
+      "t_y_m": 9.798692466,
+      "theta_rad": -3.138328398
+    },
+    "ros_distro": "jazzy",
+    "ros_domain_id": "97",
+    "state": {
+      "arm": "wheel+imu",
+      "dock": "on@1676eac0",
+      "docking": "on@a462315f",
+      "loc": "amcl@735cdbc6",
+      "log_dir": "/mnt/c/Users/ozkan/projects/amr-agent-m5v3/m5_ver3/logs/run-20260912-183842",
+      "monitor": "off",
+      "nav": "on@7f57e6cf",
+      "partition": "m5v3",
+      "traction": "nominal"
+    }
+  },
+  "fault_set": {
+    "absent_xy": [
+      -17.0,
+      10.0
+    ],
+    "block_ahead_m": 0.06,
+    "block_z_m": 0.06,
+    "boxes": {
+      "pocket_blocked": "m8_pocket_block.sdf",
+      "stringer_in_path": "m8_stringer.sdf"
+    },
+    "rotated_rad": 0.35,
+    "shifted_m": 0.3,
+    "stringer_ahead_m": 0.6,
+    "stringer_z_m": 0.03
+  },
+  "pallet_design": {
+    "x": 7.0,
+    "y": 3.03,
+    "yaw": 1.5707963267948966,
+    "z": 0.072
+  },
+  "pallet_dims": {
+    "deck_thickness_m": 0.022,
+    "depth_m": 0.8,
+    "height_m": 0.144,
+    "length_m": 1.2
+  },
+  "session": "e3-20260912-184020"
+}

@@ -1,0 +1,409 @@
+{
+  "algorithm": "m8_core.abort.classify + m8_core.selfmask",
+  "clean_frames": 40,
+  "exact": 85,
+  "exact_masked": 85,
+  "false_aborts": 0,
+  "n_frames": 110,
+  "not_a_plant_result": true,
+  "per_case": {
+    "blocked_by_box@1.000": {
+      "exact": 0,
+      "exact_masked": 0,
+      "expected": "pocket_blocked",
+      "false_abort": 0,
+      "n": 5,
+      "note": "open 3",
+      "refusals": [
+        "candidate_falls_away_like_a_floor"
+      ],
+      "segmented": 0,
+      "segmented_masked": 0,
+      "words": {
+        "pallet_absent": 5
+      },
+      "words_masked": {
+        "pallet_absent": 5
+      }
+    },
+    "blocked_by_box@1.500": {
+      "exact": 0,
+      "exact_masked": 0,
+      "expected": "pocket_blocked",
+      "false_abort": 0,
+      "n": 5,
+      "note": "open 3",
+      "refusals": [
+        "candidate_falls_away_like_a_floor"
+      ],
+      "segmented": 0,
+      "segmented_masked": 0,
+      "words": {
+        "pallet_absent": 5
+      },
+      "words_masked": {
+        "pallet_absent": 5
+      }
+    },
+    "blocked_by_box@2.245": {
+      "exact": 0,
+      "exact_masked": 0,
+      "expected": "pocket_blocked",
+      "false_abort": 0,
+      "n": 5,
+      "note": "open 3: wrong word 84 of 90 on the plant",
+      "refusals": [
+        "candidate_falls_away_like_a_floor"
+      ],
+      "segmented": 0,
+      "segmented_masked": 0,
+      "words": {
+        "pallet_absent": 5
+      },
+      "words_masked": {
+        "pallet_absent": 5
+      }
+    },
+    "clean@1.000": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "none",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "clean@1.500": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "none",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "clean@2.245": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "none",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "clipped@1.000": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "none",
+      "false_abort": 0,
+      "n": 5,
+      "note": "runs off the image",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "clipped@1.500": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "none",
+      "false_abort": 0,
+      "n": 5,
+      "note": "runs off the image",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "empty_bay@1.500": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "pallet_absent",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [
+        "candidate_falls_away_like_a_floor"
+      ],
+      "segmented": 0,
+      "segmented_masked": 0,
+      "words": {
+        "pallet_absent": 5
+      },
+      "words_masked": {
+        "pallet_absent": 5
+      }
+    },
+    "forks@1.000": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "none",
+      "false_abort": 0,
+      "n": 5,
+      "note": "open 1: one surface to this camera",
+      "refusals": [
+        "face_is_too_small_a_share"
+      ],
+      "segmented": 0,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "forks@1.500": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "none",
+      "false_abort": 0,
+      "n": 5,
+      "note": "tines and pallet separate",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "forks@2.245": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "none",
+      "false_abort": 0,
+      "n": 5,
+      "note": "tines and pallet separate",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "forks_empty@1.000": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "pallet_absent",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [
+        "candidate_falls_away_like_a_floor"
+      ],
+      "segmented": 0,
+      "segmented_masked": 0,
+      "words": {
+        "pallet_absent": 5
+      },
+      "words_masked": {
+        "pallet_absent": 5
+      }
+    },
+    "forks_empty@1.500": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "pallet_absent",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [
+        "candidate_falls_away_like_a_floor"
+      ],
+      "segmented": 0,
+      "segmented_masked": 0,
+      "words": {
+        "pallet_absent": 5
+      },
+      "words_masked": {
+        "pallet_absent": 5
+      }
+    },
+    "forks_empty@2.245": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "pallet_absent",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [
+        "candidate_falls_away_like_a_floor"
+      ],
+      "segmented": 0,
+      "segmented_masked": 0,
+      "words": {
+        "pallet_absent": 5
+      },
+      "words_masked": {
+        "pallet_absent": 5
+      }
+    },
+    "pockets_filled@1.500": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "pocket_blocked",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "pocket_blocked": 5
+      },
+      "words_masked": {
+        "pocket_blocked": 5
+      }
+    },
+    "ridge@1.000": {
+      "exact": 0,
+      "exact_masked": 0,
+      "expected": "stringer_in_path",
+      "false_abort": 0,
+      "n": 5,
+      "note": "open 4",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "ridge@1.500": {
+      "exact": 0,
+      "exact_masked": 0,
+      "expected": "stringer_in_path",
+      "false_abort": 0,
+      "n": 5,
+      "note": "open 4: a separate component, never entered",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "none": 5
+      },
+      "words_masked": {
+        "none": 5
+      }
+    },
+    "rotated_neg@1.500": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "pallet_rotated",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "pallet_rotated": 5
+      },
+      "words_masked": {
+        "pallet_rotated": 5
+      }
+    },
+    "rotated_pos@1.500": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "pallet_rotated",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "pallet_rotated": 5
+      },
+      "words_masked": {
+        "pallet_rotated": 5
+      }
+    },
+    "shifted@1.500": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "pallet_shifted",
+      "false_abort": 0,
+      "n": 5,
+      "note": "",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "pallet_shifted": 5
+      },
+      "words_masked": {
+        "pallet_shifted": 5
+      }
+    },
+    "stringer_at_face@1.000": {
+      "exact": 5,
+      "exact_masked": 5,
+      "expected": "stringer_in_path",
+      "false_abort": 0,
+      "n": 5,
+      "note": "a bar 0.08 m in front of the face",
+      "refusals": [],
+      "segmented": 5,
+      "segmented_masked": 5,
+      "words": {
+        "stringer_in_path": 5
+      },
+      "words_masked": {
+        "stringer_in_path": 5
+      }
+    }
+  },
+  "renderer": "m8_core.scene.make_scene_depth",
+  "seeds": 5,
+  "segmented": 70,
+  "segmented_masked": 75,
+  "stale_mask_words": {
+    "none": 110
+  },
+  "wall_s": 20.523200750350952
+}

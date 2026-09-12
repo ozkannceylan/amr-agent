@@ -7,6 +7,14 @@ on HOLD: the live-dock false-abort rate does not support enabling it.
 Offline session `m8/bench/results/scene-20260911-235921/`. Branch
 `m8/c1c2-plane-roi-fix`, cut from `m5-ver3-close`.
 
+FORWARD POINTER, added 2026-09-12, nothing else in this file edited and
+no number changed: the four "Next" items and open items 1, 3, 4 and 7
+are answered or advanced in `EVIDENCE_M8_E3_WORDS.md` on branch
+`m8/c2-words-and-selfmask`. Static clean false-abort 30/90 -> 0/90 and
+the live figure below, 0.884, -> 0.011 on 87 retry-free
+pallet-readback-checked frames with the shadow nodes wired as they now
+run. Phase B still HOLD. The sessions here were not overwritten.
+
 This is the ticket `EVIDENCE_M8_E1.md` and `EVIDENCE_M8_E3.md` asked
 for: "a C1/C2 rework (pallet-sized ROI, floor rejection) ... measured
 against these two files." It is the classical option. Phase F (a

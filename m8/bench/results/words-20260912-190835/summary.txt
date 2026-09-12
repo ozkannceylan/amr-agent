@@ -1,0 +1,39 @@
+OFFLINE WORD BENCH - rendered depth, no plant, no ROS.
+Not a plant result. E3 on the m5-ver3 rig is the score.
+
+case                       expected            exact   +mask     seg   +mask  words
+clean@2.245                none                5/5     5/5     5/5     5/5    {"none": 5}
+clean@1.500                none                5/5     5/5     5/5     5/5    {"none": 5}
+clean@1.000                none                5/5     5/5     5/5     5/5    {"none": 5}
+forks@2.245                none                5/5     5/5     5/5     5/5    {"none": 5}
+forks@1.500                none                5/5     5/5     5/5     5/5    {"none": 5}
+forks@1.000                none                5/5     5/5     0/5     5/5    {"none": 5}
+                           refused: ['face_is_too_small_a_share']
+forks_empty@2.245          pallet_absent       5/5     5/5     0/5     0/5    {"pallet_absent": 5}
+                           refused: ['candidate_falls_away_like_a_floor']
+forks_empty@1.500          pallet_absent       5/5     5/5     0/5     0/5    {"pallet_absent": 5}
+                           refused: ['candidate_falls_away_like_a_floor']
+forks_empty@1.000          pallet_absent       5/5     5/5     0/5     0/5    {"pallet_absent": 5}
+                           refused: ['candidate_falls_away_like_a_floor']
+empty_bay@1.500            pallet_absent       5/5     5/5     0/5     0/5    {"pallet_absent": 5}
+                           refused: ['candidate_falls_away_like_a_floor']
+blocked_by_box@2.245       pocket_blocked      0/5     0/5     0/5     0/5    {"pallet_absent": 5}
+                           refused: ['candidate_falls_away_like_a_floor']
+blocked_by_box@1.500       pocket_blocked      0/5     0/5     0/5     0/5    {"pallet_absent": 5}
+                           refused: ['candidate_falls_away_like_a_floor']
+blocked_by_box@1.000       pocket_blocked      0/5     0/5     0/5     0/5    {"pallet_absent": 5}
+                           refused: ['candidate_falls_away_like_a_floor']
+ridge@1.500                stringer_in_path    0/5     0/5     5/5     5/5    {"none": 5}
+ridge@1.000                stringer_in_path    0/5     0/5     5/5     5/5    {"none": 5}
+clipped@1.500              none                5/5     5/5     5/5     5/5    {"none": 5}
+clipped@1.000              none                5/5     5/5     5/5     5/5    {"none": 5}
+rotated_pos@1.500          pallet_rotated      5/5     5/5     5/5     5/5    {"pallet_rotated": 5}
+rotated_neg@1.500          pallet_rotated      5/5     5/5     5/5     5/5    {"pallet_rotated": 5}
+shifted@1.500              pallet_shifted      5/5     5/5     5/5     5/5    {"pallet_shifted": 5}
+pockets_filled@1.500       pocket_blocked      5/5     5/5     5/5     5/5    {"pocket_blocked": 5}
+stringer_at_face@1.000     stringer_in_path    5/5     5/5     5/5     5/5    {"stringer_in_path": 5}
+
+false aborts on frames expected clean: 0 of 40
+reason-exact: 85 of 110 unmasked, 85 masked
+segmented:    70 of 110 unmasked, 75 masked
+with a STALE mask every frame must read `none`: {"none": 110}

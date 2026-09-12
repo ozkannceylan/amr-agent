@@ -67,6 +67,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -97,9 +98,15 @@ REGIMES = (("staging", 2.0, float("inf")),
 # gz readback jitter is millimetres; 0.02 m is an order over it and well
 # under the 0.16 m pocket it would take to matter.
 PALLET_MOVED_TOL_M = 0.02
-# How often the pallet is read back WHILE a cycle runs. `gz model -p` is
-# a subprocess of about 0.1 s, so once a second costs a tenth of the
-# stream and buys a per-frame answer instead of a per-cycle one.
+# How often the pallet is read back WHILE a cycle runs, ON ITS OWN
+# THREAD. `gz model -p` is a subprocess, and session e3-20260912-183842
+# measured what calling it from the spin loop costs: cycle 0 classified
+# ONE frame, against 83 in the run before it. The depth stream is a
+# 5-deep queue and the loop that drains it cannot be blocked, so the
+# readback runs beside it and the callback reads the last value it left.
+# A frame therefore carries a reading at most this old, which is stated
+# rather than hidden - it is the same "held backwards" rule as the retry
+# join, and the pallet moves at dock speed, not at camera speed.
 PALLET_WATCH_S = 1.0
 
 # THE PAIRED SECOND CLASSIFICATION - the same depth buffer, classified
@@ -519,20 +526,30 @@ def run_cycles(plant, cap, args, inject, P, dest):
         # forks INTO the pallet, so a clean cycle does not end with a
         # clean world. Read at the ends only, that made every frame of
         # the cycle uncountable, including the whole approach taken
-        # before anything touched anything. `gz model -p` is a
-        # subprocess, so it runs on a timer and the frames between two
-        # readings carry the last one - held backwards, the same rule as
-        # the retry join.
-        watch = {"t": 0.0, "moved": moved_from_design(plant, pallet_before)}
+        # before anything touched anything.
+        watch = {"moved": moved_from_design(plant, pallet_before),
+                 "reads": 1, "stop": False}
 
-        def until(_p=proc, _t0=t_start, _w=watch):
-            now = time.time()
-            if now - _w["t"] >= PALLET_WATCH_S:
-                _w["t"] = now
-                _w["moved"] = moved_from_design(plant, pallet_before)
-            return _p.poll() is not None or (now - _t0) > CYCLE_TIMEOUT_S
+        def poll_pallet():
+            while not watch["stop"]:
+                watch["moved"] = moved_from_design(plant, pallet_before)
+                watch["reads"] += 1
+                deadline = time.time() + PALLET_WATCH_S
+                while not watch["stop"] and time.time() < deadline:
+                    time.sleep(0.05)
 
-        cap.stream(on_frame, until)
+        watcher = threading.Thread(target=poll_pallet, daemon=True)
+        watcher.start()
+
+        def until(_p=proc, _t0=t_start):
+            return (_p.poll() is not None
+                    or (time.time() - _t0) > CYCLE_TIMEOUT_S)
+
+        try:
+            cap.stream(on_frame, until)
+        finally:
+            watch["stop"] = True
+            watcher.join(timeout=35.0)
         if proc.poll() is None:
             proc.kill()
         rc = proc.wait()
@@ -585,6 +602,7 @@ def run_cycles(plant, cap, args, inject, P, dest):
                    "pallet_readback_ok": readback_ok,
                    "pallet_before": pallet_before, "pallet_after": pallet_after,
                    "pallet_moved_m": moved, "clean_cycle": clean_cycle,
+                   "pallet_reads": watch["reads"],
                    "classified": len(crow), "aborts": aborts,
                    "false_abort_rate": (aborts / len(crow)) if crow else None,
                    "countable": len(countable), "countable_aborts": c_aborts,
