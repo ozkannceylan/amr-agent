@@ -1,0 +1,154 @@
+{
+  "algorithm": "m8_core.pocket.observe (classical_floor_anchored_face)",
+  "bench": "e1_pocket",
+  "cam_mount": [
+    -0.9,
+    0.4,
+    1.1,
+    0.0,
+    0.5235988,
+    3.1415927
+  ],
+  "environment": {
+    "gallium_driver": "",
+    "gl_renderer_last": "23:59:47: GL_RENDERER = D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)",
+    "gz_partition": "m5v3",
+    "gz_sim": "Gazebo Sim, version 8.11.0",
+    "host": "ozkannotebook",
+    "kernel": "5.15.167.4-microsoft-standard-WSL2",
+    "nvidia_smi": "NVIDIA GeForce RTX 4050 Laptop GPU, 572.16",
+    "python": "3.12.3",
+    "registration": {
+      "path": "m5_ver3/maps/warehouse_v3/registration.yaml",
+      "residual_max_m": 0.117891,
+      "residual_rms_m": 0.029052,
+      "t_x_m": -17.111857467,
+      "t_y_m": 9.798692466,
+      "theta_rad": -3.138328398
+    },
+    "ros_distro": "jazzy",
+    "ros_domain_id": "97",
+    "state": {
+      "arm": "wheel+imu",
+      "dock": "on@1676eac0",
+      "docking": "on@a462315f",
+      "loc": "amcl@735cdbc6",
+      "log_dir": "/mnt/c/Users/ozkan/projects/amr-agent-m5v3/m5_ver3/logs/run-20260911-235938",
+      "monitor": "off",
+      "nav": "on@7f57e6cf",
+      "partition": "m5v3",
+      "traction": "nominal"
+    }
+  },
+  "pallet_design": {
+    "x": 7.0,
+    "y": 3.03,
+    "yaw": 1.5707963267948966,
+    "z": 0.072
+  },
+  "pallet_dims": {
+    "deck_thickness_m": 0.022,
+    "depth_m": 0.8,
+    "height_m": 0.144,
+    "length_m": 1.2
+  },
+  "poses": [
+    {
+      "base": [
+        7.0,
+        6.575,
+        1.5707963267948966
+      ],
+      "label": "staging",
+      "pallet6": [
+        7.0,
+        3.03,
+        0.072,
+        0.0,
+        -0.0,
+        1.5708
+      ],
+      "seed_map": [
+        -24.090357730869354,
+        3.2008777469301037,
+        -1.5675320712051035
+      ],
+      "truck6": [
+        7.0,
+        6.57519,
+        -1e-06,
+        -0.0,
+        -1e-06,
+        1.57079
+      ]
+    },
+    {
+      "base": [
+        7.0,
+        5.83,
+        1.5707963267948966
+      ],
+      "label": "approach_1.50m",
+      "pallet6": [
+        7.0,
+        3.03,
+        0.072,
+        0.0,
+        -0.0,
+        1.5708
+      ],
+      "seed_map": [
+        -24.092789596965005,
+        3.9458737778103314,
+        -1.5675320712051035
+      ],
+      "truck6": [
+        7.0,
+        5.83,
+        -0.0,
+        0.0,
+        0.0,
+        1.5708
+      ]
+    },
+    {
+      "base": [
+        7.0,
+        5.33,
+        1.5707963267948966
+      ],
+      "label": "approach_1.00m",
+      "pallet6": [
+        7.0,
+        3.03,
+        0.072,
+        0.0,
+        -0.0,
+        1.5708
+      ],
+      "seed_map": [
+        -24.09442172186142,
+        4.445871113971558,
+        -1.5675320712051035
+      ],
+      "truck6": [
+        7.0,
+        5.33,
+        -0.0,
+        0.0,
+        0.0,
+        1.5708
+      ]
+    }
+  ],
+  "scored_as": {
+    "lateral": "(pocket_u - cx)/fx * face_z",
+    "range": "face_z",
+    "truth": "pocket-pair centre in optical frame from gz truck + pallet pose through cam_mount/cam_optical",
+    "yaw": "face_yaw (about the floor normal)"
+  },
+  "session": "e1-20260912-000119",
+  "world_restore": {
+    "pallet": "reseated"
+  }
+}

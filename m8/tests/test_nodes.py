@@ -2,7 +2,7 @@
 import ast
 from pathlib import Path
 
-from m8_core.pocket import make_plane_depth
+import scenes
 from m8_core.wire import loads_proposal
 from m8_nodes.abort_node import proposal_json_from_depth as abort_json
 from m8_nodes.m8_health import placeholder_health, unmeasured_health
@@ -15,18 +15,22 @@ _NODES = Path(__file__).resolve().parents[1] / "m8_nodes"
 
 
 def _clean_buf():
-    frame = make_plane_depth(
-        48, 36, 1.20,
-        pockets=((10, 16, 10, 26, 1.55),
-                 (32, 38, 10, 26, 1.55)))
-    return frame.depths, frame.width, frame.height, frame.sim_stamp
+    """Depths plus the intrinsics, which the node gets from CameraInfo.
+
+    Without fx/fy the shared builder falls back to a placeholder focal
+    length and the pallet-size gate in `pocket.segment` measures the
+    face in the wrong metres - so the helpers are called the way the
+    node calls them."""
+    frame, _scene = scenes.clean()
+    return (frame.depths, frame.width, frame.height, frame.sim_stamp,
+            frame.fx, frame.fy)
 
 
 def test_pocket_and_slot_helpers_emit_json_abort_is_silent_on_clean():
-    depths, w, h, stamp = _clean_buf()
-    p = pocket_json(depths, w, h, stamp)
-    s = slot_json(depths, w, h, stamp)
-    a = abort_json(depths, w, h, stamp)
+    depths, w, h, stamp, fx, fy = _clean_buf()
+    p = pocket_json(depths, w, h, stamp, fx=fx, fy=fy)
+    s = slot_json(depths, w, h, stamp, fx=fx, fy=fy)
+    a = abort_json(depths, w, h, stamp, fx=fx, fy=fy)
     assert p is not None and s is not None
     assert loads_proposal(p).kind == "DOCK_TARGET_REFINE"
     assert loads_proposal(s).kind == "SLOT_STATE"
@@ -34,8 +38,8 @@ def test_pocket_and_slot_helpers_emit_json_abort_is_silent_on_clean():
 
 
 def test_veto_gate_helper_refuses_a_well_formed_proposal():
-    depths, w, h, stamp = _clean_buf()
-    text = pocket_json(depths, w, h, stamp)
+    depths, w, h, stamp, fx, fy = _clean_buf()
+    text = pocket_json(depths, w, h, stamp, fx=fx, fy=fy)
     gate = Gate(phase="A")
     verdict_text, row = evaluate_json(gate, text, 1.05, healthy())
     assert row["accepted"] is False

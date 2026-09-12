@@ -1,0 +1,22 @@
+OFFLINE SCENE BENCH - rendered depth, no plant, no ROS.
+Not a plant result. E1/E3 on the m5-ver3 rig are the score.
+bar (quoted): tag rms 0.0706 m / 211 samples at staging (R1), measured on the plant, not by this script
+
+C1 pocket pose
+  pose              obs/n     rms 2d     max 2d    rms yaw   observe
+  staging           50/50     0.0062     0.0096     0.0008    0.055 s
+  approach_1.5      50/50     0.0078     0.0100     0.0007    0.055 s
+  approach_1.0      45/50     0.0127     0.0279     0.0005    0.060 s
+  overall 145/150 observed, rms 2d 0.0092 m, 0 of 145 at or over the bar
+  A1's atan(dz/dx) yaw proxy, same frames: rms error 0.1138 rad
+
+C2 abort classifier
+  clean            expected none             exact 30/30  words {"none": 30}
+  empty_bay        expected pallet_absent    exact 30/30  words {"pallet_absent": 30}
+  rotated_pos      expected pallet_rotated   exact 30/30  words {"pallet_rotated": 30}
+  rotated_neg      expected pallet_rotated   exact 30/30  words {"pallet_rotated": 30}
+  pockets_filled   expected pocket_blocked   exact 30/30  words {"pocket_blocked": 30}
+  stringer         expected stringer_in_path exact 30/30  words {"stringer_in_path": 30}
+  shifted          expected pallet_shifted   exact 30/30  words {"pallet_shifted": 30}
+  false aborts on clean frames: 0 of 30
+  classify median 0.074 s

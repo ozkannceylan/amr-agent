@@ -283,3 +283,66 @@ registration md5 gate (CRLF in registration.yaml); LF checkout fixed it.
 
 Rules carried: no algorithm tuning inside a bench; ground truth is a
 score, not a command; instrument floors named; frames stay on the rig.
+
+
+---
+
+# M8 C1/C2 classical plane+ROI fix (branch `m8/c1c2-plane-roi-fix`)
+
+2026-09-11, owner GO on the ratified plan: classical fix, NOT Phase F;
+branch off `m5-ver3-close`; do not overwrite the H1 baseline folders;
+new `bench/results/` session folders only. All four held.
+
+- [x] 1. Root cause confirmed offline before any change: A1's model
+      `z = a x + b y + c` is not the equation of a plane in pixel
+      coordinates (a plane is linear in INVERSE depth), and its fixed
+      central band is the floor on a camera pitched 30 deg down. The
+      refit of A1's own model over A1's own band on a plant-faithful
+      frame has a residual rms of 0.426 m — it never described the
+      surface it was fitted to.
+- [x] 2. `m8_core/scene.py`: a depth renderer with a FLOOR in it. Every
+      A1 offline fixture was one flat surface filling the frame, which
+      is exactly why the suite was green while the plant failed. Pinned
+      to E1's truth column to the millimetre at all three poses.
+- [x] 3. `m8_core/pocket.py` rewritten: dominant (floor) plane, blob of
+      what stands above it, deck cut, mode seed on horizontal distance,
+      perpendicular trimming, pallet-sized gate in metres, validated
+      pocket pair, yaw about the floor's normal.
+- [x] 4. `m8_core/abort.py` rewritten on the same segmentation.
+      Thresholds argued from the pallet (a 0.160 x 0.800 m pocket
+      admits a straight fork only below atan(0.160/0.800) = 0.1974 rad).
+- [x] 5. `bench/offline_scene.py` + session `scene-20260911-200542`:
+      C1 145/150 observed, rms 2-D 0.0092 m (bar 0.0706), 0 over the
+      bar, yaw rms 0.0008 rad; C2 210/210 reason-exact, 0 false aborts.
+      `e1_pocket.py` / `e3_abort.py` log the derived ROI and read
+      `face_yaw`; NOT_RUN contract kept.
+- [x] 6. Range window + tag-seeded ROI (C1) and a fork-path test read
+      off the FLOOR MODEL instead of a plane intercept (C2). Suite
+      109 -> 121.
+- [x] 7. **PLANT RE-RUN of E1 and E3**, 2026-09-12, this rig, sessions
+      `e1-20260912-000726` and `e3-20260912-000826`. E1: staging 30/30
+      at map-chain rms 0.0564 m - BAR MET (0.0706 m, the bar's own
+      chain and pose); 1.5 m 30/30 at 0.0079 m camera-frame; 1.0 m
+      0/30 refused. E3: clean static false-abort 90/90 -> 0/30 at
+      staging and 0/30 at 1.5 m; live-dock false-abort 1.000 -> 0.884.
+      Two plant findings named by the code, not guessed: at staging the
+      largest standing object was a WALL (multi-candidate search fixed
+      it), and at 1.0 m the truck's own forks are continuous with the
+      pallet with no range step (left refusing - a wrong pose in the
+      last metre is worse than none).
+- [ ] 8. OPEN, in the order the numbers argue for: wire the tag target
+      into the shadow nodes; decide what C1 does in the last metre;
+      explain `pocket_blocked`'s word (84/90 say `pallet_absent`) and
+      the live-cycle frame counts (997 vs 76). PHASE B STAYS ON HOLD.
+      E4/E5 NOT_RUN.
+
+## Review
+Suite 79 -> 121, `python -m pytest m8/tests`, no ROS on the machine.
+E1 and E3 RE-RUN on the plant. Evidence:
+`m8/EVIDENCE_M8_C1C2_FIX.md` ("On the plant"). Baseline files E1/E3
+carry a forward pointer and are otherwise untouched; no existing result
+folder was overwritten. Ten open items are named in the evidence file -
+the load-bearing ones are that C1 sees nothing at 1.0 m on the plant,
+that Phase B cannot open on a 0.884 live false-abort, and that
+`pocket_blocked`'s word and the live-cycle frame counts have numbers
+but no explanation.

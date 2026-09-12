@@ -1,16 +1,15 @@
 """Shadow pipeline: proposers → Phase A gate → refuse all, log all."""
 from m8_core.gate import REASON_PHASE_A_SHADOW, Gate, healthy
 from m8_core.pipeline import all_refused, propose_all, shadow_tick
-from m8_core.pocket import make_plane_depth
 from m8_core.topics import A1_NODE_FILES, PUBLISH_TOPICS
 from m8_core.wire import dumps_proposal, loads_proposal
 
 
+import scenes
+
+
 def _clean():
-    return make_plane_depth(
-        48, 36, 1.20,
-        pockets=((10, 16, 10, 26, 1.55),
-                 (32, 38, 10, 26, 1.55)))
+    return scenes.clean()[0]
 
 
 def test_shadow_tick_refuses_every_proposal_and_logs_each():

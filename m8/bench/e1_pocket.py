@@ -14,9 +14,16 @@ pose N depth frames are taken; `m8_core.pocket.observe` (the SAME code
 the shadow node runs, on the SAME 640x480 frames) is run per frame and
 its outputs are read as the pocket-pair point the node would propose:
 
-    range   = face_z                       (plane intercept on the axis)
+    range   = face_z                       (face plane at the pocket centre)
     lateral = (pocket_u - cx) / fx * face_z
-    yaw     = atan(face_a)                 (dtheta in propose())
+    yaw     = face_yaw                     (dtheta in propose())
+
+CHANGED BY THE C1/C2 PLANE+ROI FIX, and both readings are the module's
+own: `face_z` is the face plane evaluated AT THE POCKET CENTRE rather
+than extrapolated to the optical axis, and `yaw` is `face_yaw`, an
+angle about the floor's normal, rather than `atan(face_a)`, which is
+that angle times D / cos^2(mount pitch). The `plane_*` columns still
+carry the on-axis reading so the E1 baseline table stays comparable.
 
 Each is scored against the pallet's pocket-pair centre carried into the
 optical frame through vehicle.cam_mount / cam_optical from the gz pose
@@ -61,6 +68,8 @@ CSV_FIELDS = (
     "e_lat_m", "e_range_m", "e_2d_m", "e_yaw_rad",
     "tf", "map_est_x", "map_est_y", "map_tru_x", "map_tru_y", "e_map_xy_m",
     "pocket_u", "pocket_v", "face_a", "face_b", "inliers", "valid",
+    "roi_u0", "roi_u1", "roi_v0", "roi_v1", "face_width_m",
+    "face_height_m", "pocket_span_m", "floor_found",
     "face_u0", "face_u1", "face_v0", "face_v1", "face_frac_plane_roi",
     "face_frac_band_roi", "depth_at_pocket_px_m", "chain_check_m",
     "plane_a", "plane_b", "plane_c_m", "plane_n", "plane_c_err_m",
@@ -107,7 +116,10 @@ def score_frame(plant, frame, truth, pose_label, k):
     obs = observe(df)
     t2 = time.perf_counter()
     # Diagnostic, outside the timed call: the plane C1 fitted whether or
-    # not a pocket pair followed. Names what the "face" was.
+    # not a pocket pair followed. Names what the "face" was. Since the
+    # fix this is the DERIVED-ROI face plane read on the optical axis,
+    # not a fixed central band - the column is comparable with the A1
+    # baseline table, its ROI is not.
     plane = fit_face_plane(df)
 
     info = frame["info"]
@@ -141,7 +153,7 @@ def score_frame(plant, frame, truth, pose_label, k):
     if obs is not None:
         est_range = obs.face_z
         est_lat = (obs.pocket_u - cx) / fx * obs.face_z
-        est_yaw = math.atan(obs.face_a)
+        est_yaw = obs.face_yaw
         row.update(
             est_lat_m=est_lat, est_range_m=est_range, est_yaw_rad=est_yaw,
             e_lat_m=est_lat - tru_lat, e_range_m=est_range - tru_range,
@@ -149,7 +161,13 @@ def score_frame(plant, frame, truth, pose_label, k):
             e_yaw_rad=geom.wrap(est_yaw - truth["face_yaw_opt"]),
             pocket_u=obs.pocket_u, pocket_v=obs.pocket_v,
             face_a=obs.face_a, face_b=obs.face_b,
-            inliers=obs.inliers, valid=obs.valid)
+            inliers=obs.inliers, valid=obs.valid,
+            roi_u0=obs.roi_u0, roi_u1=obs.roi_u1,
+            roi_v0=obs.roi_v0, roi_v1=obs.roi_v1,
+            face_width_m=obs.face_width_m,
+            face_height_m=obs.face_height_m,
+            pocket_span_m=obs.pocket_span_m,
+            floor_found=1 if obs.floor_found else 0)
         if frame.get("map_optical"):
             est_h = (obs.pocket_v - cy) / fy * obs.face_z
             mp = _map_point(frame["map_optical"], (est_lat, est_h, est_range))
@@ -327,9 +345,9 @@ def run(args) -> int:
         "environment": plant.environment(), "poses": manifest_poses,
         "pallet_design": plant.pallet_design, "pallet_dims": plant.pallet_dims,
         "cam_mount": plant.cam_mount, "world_restore": restored,
-        "algorithm": "m8_core.pocket.observe (classical_plane_pockets), unmodified",
+        "algorithm": "m8_core.pocket.observe (classical_floor_anchored_face)",
         "scored_as": {"range": "face_z", "lateral": "(pocket_u - cx)/fx * face_z",
-                      "yaw": "atan(face_a)", "truth": "pocket-pair centre in optical frame "
+                      "yaw": "face_yaw (about the floor normal)", "truth": "pocket-pair centre in optical frame "
                       "from gz truck + pallet pose through cam_mount/cam_optical"},
     })
     lines = write_summary_txt(os.path.join(dest, "summary.txt"), session, poses_out, plant, args)
