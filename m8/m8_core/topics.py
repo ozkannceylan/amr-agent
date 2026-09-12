@@ -10,6 +10,13 @@ CAM_DEPTH = "/forklift/gz/cam/depth_image"
 CAM_INFO = "/forklift/gz/cam/camera_info"
 CAM_IMAGE = "/forklift/gz/cam/image"
 
+# The vehicle telling M8 where its OWN forks are. Subscribe only, and it
+# is a joint position in metres - not a command, not a frame, not a pose.
+# forklift_ver3/model.sdf publishes steer_joint, drive_wheel_joint and
+# mast_joint here; `m8_core.selfmask` reads the third and nothing else.
+JOINT_STATE = "/forklift/gz/joint_state"
+MAST_JOINT = "mast_joint"
+
 # M8 wire. JSON text matching m8_msgs/*.msg field names. m8_msgs is
 # not built in A1; std_msgs/String carries the same fields.
 PROPOSAL = "/m8/proposal"
@@ -24,6 +31,7 @@ CONSUMER_SPEED = "/m8/consumer/speed_ceiling"
 
 PUBLISH_TOPICS = (PROPOSAL, VERDICT, HEALTH, LOG)
 SUBSCRIBE_CAMERA = (CAM_DEPTH, CAM_INFO)
+SUBSCRIBE_VEHICLE = (JOINT_STATE,)
 A1_NODE_FILES = (
     "pocket_pose_node.py",
     "abort_node.py",

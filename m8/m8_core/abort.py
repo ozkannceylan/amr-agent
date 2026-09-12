@@ -64,6 +64,8 @@ from .contract import (
     make_proposal,
 )
 from .pocket import (
+    PALLET_FACE_HEIGHT_M,
+    PALLET_FACE_WIDTH_M,
     DepthFrame,
     blob_touches_border,
     face_yaw,
@@ -115,6 +117,23 @@ MEASURED_NOT_A_PALLET = frozenset((
     "face_height_not_pallet_sized",
 ))
 
+# CLIPPING ONLY UNDERMINES A LOWER BOUND. An object that runs off the
+# image reads NARROWER and SHORTER than it is - never wider, never
+# taller - so "too small to be a pallet" on a clipped candidate is a
+# statement about the framing, while "too wide" or "too tall" is a
+# statement about the object and survives it. `candidate_falls_away_
+# like_a_floor` is a SHAPE test, not a size one, and survives clipping
+# outright: a floor seen through a letterbox is still a floor.
+#
+# This matters and it was measured, not assumed. The truck's own tines
+# start under the camera and run to the bottom edge of every frame, so a
+# rule that discounted any clipped candidate would discount the tines -
+# and with the bay empty the tines are most of what there is to measure.
+SIZE_GATE_LOWER_EDGE = {
+    "face_width_not_pallet_sized": ("width_m", PALLET_FACE_WIDTH_M[0]),
+    "face_height_not_pallet_sized": ("height_m", PALLET_FACE_HEIGHT_M[0]),
+}
+
 # The pallet may be in this frame and the segmentation could not isolate
 # it. `face_is_too_small_a_share` is E1's finding 2 by name: the face IS
 # there, merged with a second surface, and holds 23-25 % of the blob.
@@ -143,11 +162,13 @@ def word_for_refusals(frame: DepthFrame, trace: dict) -> Optional[str]:
          merged fork-and-pallet blob is enough to make `pallet_absent`
          false, whatever the other seven candidates were.
       2. A candidate that was measured and is not pallet-sized is
-         evidence of an empty bay - UNLESS it ran off the edge of the
-         image, because a clipped object reads too narrow or too short
-         for reasons that have nothing to do with what it is. The floor
-         fallback is not a clipped object: it is the whole frame by
-         construction, and it is the purest empty-bay evidence there is.
+         evidence of an empty bay - UNLESS the reading that rejected it
+         was a LOWER bound taken on an object that ran off the image,
+         because a clipped object reads narrower and shorter than it is.
+         "Too wide", "too tall" and "this is a floor" all survive
+         clipping. The floor fallback is not a clipped object: it is the
+         whole frame by construction, and it is the purest empty-bay
+         evidence there is.
       3. With no evidence either way, say nothing.
 
     Frame-level refusals (`no_dominant_plane`, `empty_frame`) leave the
@@ -159,19 +180,34 @@ def word_for_refusals(frame: DepthFrame, trace: dict) -> Optional[str]:
         why = item.get("why")
         if why in COULD_STILL_BE_THE_PALLET:
             return None
-        if why in MEASURED_NOT_A_PALLET:
-            bbox = item.get("blob")
-            if (item.get("standing") and bbox is not None
-                    and blob_touches_border(frame, bbox)):
-                continue
-            evidence = True
+        if why not in MEASURED_NOT_A_PALLET:
+            continue
+        if _clipping_explains_it(frame, item):
+            continue
+        evidence = True
     return "pallet_absent" if evidence else None
+
+
+def _clipping_explains_it(frame: DepthFrame, item: dict) -> bool:
+    """Was this candidate rejected for reading smaller than it is."""
+    gate = SIZE_GATE_LOWER_EDGE.get(item.get("why"))
+    if gate is None:
+        return False
+    key, low_edge = gate
+    measured = item.get(key)
+    if measured is None or measured >= low_edge:
+        return False                     # it was too BIG, which clipping
+        # cannot cause, or the fit never reported a size at all
+    bbox = item.get("blob")
+    return bool(item.get("standing") and bbox is not None
+                and blob_touches_border(frame, bbox))
 
 
 def classify(frame: DepthFrame,
              target_u: Optional[float] = None,
              target_v: Optional[float] = None,
-             expected_range: Optional[float] = None) -> Optional[str]:
+             expected_range: Optional[float] = None,
+             self_mask=None) -> Optional[str]:
     """Return an ABORT_REASONS member, or None if the frame looks clean.
 
     The `target_*` and `expected_range` arguments are the live tag's
@@ -189,6 +225,18 @@ def classify(frame: DepthFrame,
     survives clipping; every word that is a claim about the whole pallet
     does not.
     """
+    if self_mask is not None and self_mask.is_stale(frame.sim_stamp):
+        # A SELF-MASK IN THE WRONG PLACE DELETES PART OF THE PALLET. The
+        # mask is placed by `mast_joint`, so a stale joint reading is a
+        # mask of unknown position, and at 1.0 m the tine tips are 25 mm
+        # from the pallet face. A classifier that cannot tell its own
+        # forks from the scene has no word worth publishing, so it
+        # publishes none. Silence is not `proceed`.
+        #
+        # This is reached ONLY when a caller opts into masking. A caller
+        # that passes no mask gets exactly the classifier it got before.
+        return None
+
     valid = frame.valid_count()
     if valid < ABSENT_VALID_FRAC * frame.width * frame.height:
         # Nothing within range anywhere in the frame - not even a floor.
@@ -199,7 +247,8 @@ def classify(frame: DepthFrame,
 
     trace: dict = {}
     seg = segment(frame, expected_range=expected_range,
-                  tag_u=target_u, tag_v=target_v, trace=trace)
+                  tag_u=target_u, tag_v=target_v, trace=trace,
+                  self_mask=self_mask)
     if seg is None:
         return word_for_refusals(frame, trace)
 
@@ -234,9 +283,10 @@ def propose(frame: DepthFrame,
             confidence: float = 0.8,
             target_u: Optional[float] = None,
             target_v: Optional[float] = None,
-            expected_range: Optional[float] = None) -> Optional[object]:
+            expected_range: Optional[float] = None,
+            self_mask=None) -> Optional[object]:
     reason = classify(frame, target_u=target_u, target_v=target_v,
-                      expected_range=expected_range)
+                      expected_range=expected_range, self_mask=self_mask)
     if reason is None:
         return None
     return make_proposal(

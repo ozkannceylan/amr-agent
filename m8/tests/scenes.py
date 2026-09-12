@@ -65,19 +65,22 @@ def shifted(lateral: float = 0.75, distance: float = APPROACH_M):
 
 
 # --- the plant's own findings, rendered -----------------------------------
-# EVIDENCE_M8_C1C2_FIX finding 2: a vehicle-fixed structure 0.5-1.0 m from
-# this camera at about 0.1 m above the floor, present at every pose, and
-# at 1.0 m continuous with the pallet - no range discontinuity at the
-# junction, so depth-aware connectivity cannot split them either. Two
-# tines, centred on the vehicle centreline, which is 0.40 m to the RIGHT
-# of this camera's optical axis (the pallet sits at lateral -0.40).
-FORK_REACH_M = (0.50, 1.00)
-FORK_HEIGHT_M = 0.10
-FORK_TINES = ((-0.68, -0.52), (-0.28, -0.12))
+# EVIDENCE_M8_C1C2_FIX finding 2 measured a vehicle-fixed structure
+# 0.5-1.0 m from this camera at about 0.1 m above the floor, present at
+# every pose, and at 1.0 m continuous with the pallet. This is that
+# structure off the model, not off the finding: `m8_core.selfmask`
+# derives the same numbers from forklift_ver3/model.sdf and config.yaml,
+# and the fixture renders what those numbers describe.
+from m8_core import selfmask                                   # noqa: E402
+
+FORK_REACH_M = (0.0, selfmask.TINE_REACH_M)
+FORK_HEIGHT_M = selfmask.TINE_TOP_M
+FORK_TINES = selfmask.TINE_LATERAL_M
 
 
-def _fork_slabs(reach=FORK_REACH_M):
-    return tuple((lat0, lat1, FORK_HEIGHT_M, reach[0], reach[1])
+def _fork_slabs(lift_m: float = 0.0):
+    return tuple((lat0, lat1, FORK_HEIGHT_M + lift_m,
+                  FORK_REACH_M[0], FORK_REACH_M[1])
                  for lat0, lat1 in FORK_TINES)
 
 

@@ -215,20 +215,54 @@ def test_clipping_does_not_silence_an_obstruction_that_is_in_view():
     assert classify(frame) == "stringer_in_path"
 
 
-def test_a_clipped_candidate_is_not_evidence_of_an_empty_bay():
+def test_a_clipped_candidate_reading_too_narrow_is_not_evidence():
     """A half-visible pallet reads too narrow, for reasons about framing.
 
-    `face_width_not_pallet_sized` on an object at the edge of the image
-    is a statement about the image, not about the bay.
+    `face_width_not_pallet_sized` at 0.30 m on an object at the edge of
+    the image is a statement about the image, not about the bay.
     """
     from m8_core.abort import word_for_refusals
     frame, _scene = scenes.clean()
     edge = {"refusals": [{"why": "face_width_not_pallet_sized",
-                          "blob": (0, 40, 10, 60), "standing": True}]}
+                          "blob": (0, 40, 10, 60), "standing": True,
+                          "width_m": 0.30}]}
     inside = {"refusals": [{"why": "face_width_not_pallet_sized",
-                            "blob": (40, 80, 10, 60), "standing": True}]}
+                            "blob": (40, 80, 10, 60), "standing": True,
+                            "width_m": 0.30}]}
     assert word_for_refusals(frame, edge) is None
     assert word_for_refusals(frame, inside) == "pallet_absent"
+
+
+def test_clipping_cannot_explain_an_object_that_read_too_big():
+    """Clipping makes a thing read SMALLER. It never makes one read bigger.
+
+    The plant's own finding 1 is this case: at staging the largest thing
+    standing above the floor was a warehouse wall 1.3555 m tall, and a
+    wall that runs off the top of the image is still too tall to be a
+    pallet.
+    """
+    from m8_core.abort import word_for_refusals
+    frame, _scene = scenes.clean()
+    tall_and_clipped = {"refusals": [
+        {"why": "face_height_not_pallet_sized", "blob": (0, 120, 0, 60),
+         "standing": True, "height_m": 1.3555}]}
+    assert word_for_refusals(frame, tall_and_clipped) == "pallet_absent"
+
+
+def test_a_shape_test_survives_clipping_outright():
+    """A floor seen through a letterbox is still a floor.
+
+    This is not a size reading, so there is no lower bound for clipping
+    to undermine. It is also the refusal the truck's own tines raise -
+    they start under the camera and run to the bottom edge of EVERY
+    frame - so a rule that discounted any clipped candidate would throw
+    away most of what an empty bay has to offer.
+    """
+    from m8_core.abort import word_for_refusals
+    frame, _scene = scenes.clean()
+    trace = {"refusals": [{"why": "candidate_falls_away_like_a_floor",
+                           "blob": (0, 320, 100, 240), "standing": True}]}
+    assert word_for_refusals(frame, trace) == "pallet_absent"
 
 
 def test_one_could_be_the_pallet_refusal_outvotes_any_number_of_others():
