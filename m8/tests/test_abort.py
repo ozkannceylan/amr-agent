@@ -16,6 +16,7 @@ from m8_core.abort import (
 from m8_core.contract import ABORT_REASONS, KIND_DOCK_ABORT
 from m8_core.pocket import (
     DepthFrame,
+    blob_touches_border,
     fork_path_fraction,
     make_plane_depth,
     segment,
@@ -139,3 +140,135 @@ def test_a_frame_with_no_floor_model_claims_no_obstruction():
     if seg is not None:
         assert seg.floor is None
         assert fork_path_fraction(frame, seg, STRINGER_NEAR_M) == 0.0
+
+
+# ------------------------------------------- the word a refusal deserves
+#
+# `EVIDENCE_M8_C1C2_FIX.md` measured 0.884 live false-abort and named the
+# cause: inside 1.2 m the truck's own forks are continuous with the
+# pallet, C1 refuses, and the classifier had one word for "no face" -
+# `pallet_absent`. The bay was not empty. These hold the word policy that
+# replaced it. NO THRESHOLD MOVED; the tests above are the proof, since
+# all five fault words are still said on the same frames.
+def test_the_trucks_own_forks_are_not_an_empty_bay():
+    """The 0.884 false-abort, reproduced offline and then removed.
+
+    At 1.0 m the tines and the pallet are one standing object with no
+    range discontinuity at the junction, so `segment` refuses with
+    `face_is_too_small_a_share` - a refusal that says the face IS there,
+    holding 23-25 % of the blob. Answering it with `pallet_absent` says
+    the opposite of what the refusal found.
+    """
+    frame, _scene = scenes.forks(scenes.CLOSE_M)
+    trace = {}
+    assert segment(frame, trace=trace) is None
+    assert trace["refusals"][0]["why"] == "face_is_too_small_a_share"
+    assert classify(frame) is None
+
+
+@pytest.mark.parametrize("distance", [scenes.STAGING_M, scenes.APPROACH_M])
+def test_the_forks_do_not_hide_the_pallet_further_out(distance):
+    """At 1.5 m and staging there is clean floor between them."""
+    frame, _scene = scenes.forks(distance)
+    assert segment(frame) is not None
+    assert classify(frame) is None
+
+
+@pytest.mark.parametrize("distance", [scenes.STAGING_M, scenes.APPROACH_M,
+                                      scenes.CLOSE_M])
+def test_an_empty_bay_is_still_absent_with_the_forks_in_view(distance):
+    """The word policy must not buy silence with the empty bay.
+
+    The tines stand above the floor at every pose, so they are candidate
+    blobs at every pose. They are measured and they are not pallet-sized,
+    which is exactly what an empty bay looks like.
+    """
+    frame, _scene = scenes.forks_empty_bay(distance)
+    assert classify(frame) == "pallet_absent"
+
+
+def test_a_pallet_running_off_the_image_supports_no_word_about_the_pallet():
+    """Border -> None. A clipped object is measured on a part.
+
+    Its width in metres is a lower bound, its plane is fitted to what is
+    visible, and its pocket pair may be off-frame. A1's successor said
+    `pocket_blocked` here, having found one run of pocket-deep columns
+    instead of two - on a pallet that is not blocked at all.
+    """
+    frame, _scene = scenes.clipped()
+    seg = segment(frame)
+    assert seg is not None
+    assert blob_touches_border(frame, seg.blob)
+    assert classify(frame) is None
+
+
+def test_clipping_does_not_silence_an_obstruction_that_is_in_view():
+    """An obstruction seen INSIDE the visible region is still seen.
+
+    Only the words that claim something about the WHOLE pallet - its
+    yaw, its pocket pair, its lateral offset - are withheld.
+    """
+    frame, _scene = scenes.stringer(scenes.CLOSE_M)
+    seg = segment(frame)
+    assert seg is not None
+    assert not blob_touches_border(frame, seg.blob)
+    assert classify(frame) == "stringer_in_path"
+
+
+def test_a_clipped_candidate_is_not_evidence_of_an_empty_bay():
+    """A half-visible pallet reads too narrow, for reasons about framing.
+
+    `face_width_not_pallet_sized` on an object at the edge of the image
+    is a statement about the image, not about the bay.
+    """
+    from m8_core.abort import word_for_refusals
+    frame, _scene = scenes.clean()
+    edge = {"refusals": [{"why": "face_width_not_pallet_sized",
+                          "blob": (0, 40, 10, 60), "standing": True}]}
+    inside = {"refusals": [{"why": "face_width_not_pallet_sized",
+                            "blob": (40, 80, 10, 60), "standing": True}]}
+    assert word_for_refusals(frame, edge) is None
+    assert word_for_refusals(frame, inside) == "pallet_absent"
+
+
+def test_one_could_be_the_pallet_refusal_outvotes_any_number_of_others():
+    """Seven candidates that are not pallets do not make the eighth absent."""
+    from m8_core.abort import word_for_refusals
+    frame, _scene = scenes.clean()
+    trace = {"refusals": [
+        {"why": "face_height_not_pallet_sized", "blob": (40, 80, 10, 60),
+         "standing": True},
+        {"why": "face_width_not_pallet_sized", "blob": (90, 130, 10, 60),
+         "standing": True},
+        {"why": "face_is_too_small_a_share", "blob": (140, 180, 10, 60),
+         "standing": True},
+    ]}
+    assert word_for_refusals(frame, trace) is None
+
+
+def test_a_refusal_name_nobody_classified_says_nothing():
+    """The safe default for a word policy is silence.
+
+    A gate added to `pocket` later must not start claiming an empty bay
+    just by existing.
+    """
+    from m8_core.abort import word_for_refusals
+    frame, _scene = scenes.clean()
+    trace = {"refusals": [{"why": "some_gate_added_in_2027",
+                           "blob": (40, 80, 10, 60), "standing": True}]}
+    assert word_for_refusals(frame, trace) is None
+    assert word_for_refusals(frame, {}) is None
+
+
+def test_the_floor_fallback_is_not_a_clipped_object():
+    """An all-floor frame IS the whole frame, and it is the purest absence.
+
+    The fallback candidate's box is (0, w, 0, h) by construction, so a
+    border rule that did not know about it would silence the one case
+    `pallet_absent` is unambiguously right for.
+    """
+    frame, _scene = scenes.absent()
+    trace = {}
+    assert segment(frame, trace=trace) is None
+    assert trace["refusals"][-1]["standing"] is False
+    assert classify(frame) == "pallet_absent"

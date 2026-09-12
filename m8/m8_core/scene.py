@@ -79,6 +79,7 @@ class Scene:
                  pocket_outer: float = 0.360,
                  pocket_height: float = 0.122,
                  obstacles: Sequence[Tuple[float, float, float, float, float]] = (),
+                 slabs: Sequence[Tuple[float, float, float, float, float]] = (),
                  wall_distance: Optional[float] = None,
                  max_range: float = PLANT_MAX_RANGE_M):
         self.h = float(cam_height)
@@ -94,6 +95,7 @@ class Scene:
         self.pocket_outer = float(pocket_outer)
         self.pocket_height = float(pocket_height)
         self.obstacles = tuple(obstacles)
+        self.slabs = tuple(slabs)
         self.wall_distance = wall_distance
         self.max_range = float(max_range)
         # Face normal, rotated about the world vertical. up x fwd = -right.
@@ -184,6 +186,34 @@ class Scene:
                     best = z
         return best
 
+    def _slab_hit(self, r: Vec3) -> Optional[float]:
+        """Top face of a horizontal structure: (lat0, lat1, height, d0, d1).
+
+        An `obstacle` is fronto-parallel - one vertical rectangle at one
+        horizontal distance - and cannot render a thing that REACHES
+        toward the pallet. The truck's own forks do exactly that:
+        `EVIDENCE_M8_C1C2_FIX.md` finding 2 measured a vehicle-fixed
+        structure 0.5-1.0 m from this camera at about 0.1 m above the
+        floor, continuous with the pallet at 1.0 m with no range
+        discontinuity at the junction. That is a horizontal top surface
+        over a span of distance, and it is what this renders.
+        """
+        den = _dot(self.up, r)
+        if den >= -1e-9:
+            return None
+        best = None
+        for lat0, lat1, height, d0, d1 in self.slabs:
+            z = (height - self.h) / den
+            if z <= 0.0:
+                continue
+            p = _scale(r, z)
+            lat = _dot(p, self.right)
+            d = _dot(p, self.fwd)
+            if lat0 <= lat <= lat1 and d0 <= d <= d1:
+                if best is None or z < best:
+                    best = z
+        return best
+
     def _wall_hit(self, r: Vec3) -> Optional[float]:
         if self.wall_distance is None:
             return None
@@ -198,7 +228,7 @@ class Scene:
         r: Vec3 = (x, y, 1.0)
         best = None
         for z in (self._face_hit(r), self._deck_hit(r), self._obstacle_hit(r),
-                  self._floor_hit(r), self._wall_hit(r)):
+                  self._slab_hit(r), self._floor_hit(r), self._wall_hit(r)):
             if z is not None and (best is None or z < best):
                 best = z
         if best is None or best > self.max_range:

@@ -503,6 +503,23 @@ def _blob_candidates(frame: DepthFrame, floor: Plane, stride: int,
     return boxes
 
 
+def blob_touches_border(frame: DepthFrame,
+                        bbox: Tuple[int, int, int, int]) -> bool:
+    """Does this standing object run off the edge of the image.
+
+    A clipped object's width and height in metres are LOWER BOUNDS, and
+    the plane fitted to it is fitted to a part, so any claim about the
+    WHOLE object - its size, its yaw, whether it has two pockets - is a
+    claim the frame does not support. `m8_core.abort` is the caller that
+    acts on this; nothing in the segmentation is changed by it.
+
+    `_blob_candidates` clamps a box to the frame, so a blob that reached
+    an edge sits exactly on 0 or on width / height.
+    """
+    u0, u1, v0, v1 = bbox
+    return bool(u0 <= 0 or v0 <= 0 or u1 >= frame.width or v1 >= frame.height)
+
+
 def _refuse(trace: Optional[Dict[str, object]], why: str) -> None:
     """Name the gate that stopped this frame, then return None.
 
@@ -748,17 +765,28 @@ def segment(frame: DepthFrame,
         # floor that reached here.
         attempts = [(None, (0, frame.width, 0, frame.height))]
     last: Dict[str, object] = {}
+    # EVERY candidate's refusal, not only the last one's. A caller that
+    # has to choose a WORD for "no face" needs the whole set: "the only
+    # thing standing here is not pallet-shaped" and "the pallet is here
+    # and merged with the truck's own forks" are both one refusal each,
+    # and they argue for opposite words. `standing` is False for the
+    # floor fallback, which is the frame itself and not a clipped object.
+    refusals: List[Dict[str, object]] = []
     for index, (floor_for_fit, bbox) in enumerate(attempts):
         step: Dict[str, object] = {}
         seg = _try_candidate(frame, floor_for_fit, bbox, fine, window, step)
         if seg is not None:
             if trace is not None:
                 trace.update(step)
+                trace["refusals"] = refusals
                 trace["candidate_used"] = index
             return seg
+        refusals.append({"why": step.get("refused"), "blob": bbox,
+                         "standing": floor_for_fit is not None})
         last = step
     if trace is not None:
         trace.update(last)
+        trace["refusals"] = refusals
         trace["candidate_used"] = None
     return None
 

@@ -31,6 +31,27 @@ argued from the pallet, not fitted to a corpus:
     which is the whole of A1's mistake, and the region searched is the
     whole standing object - a bar in front of the face projects BELOW
     the face rows and at 1.0 m misses them completely.
+
+THE WORD POLICY, AND WHY IT IS NOT A THRESHOLD. `EVIDENCE_M8_C1C2_FIX.md`
+measured the thresholds above working - every staged fault was aborted
+on, clean static frames read `none` at staging and 1.5 m - and the live
+false-abort rate still 0.884. The thresholds were not what was wrong.
+The WORDS were: "no segmented face" was answered with `pallet_absent`
+whatever the reason, and inside 1.2 m the reason is that the truck's own
+forks are continuous with the pallet. The bay was full every time.
+
+Two rules replace it, and neither moves a number:
+
+  * `pallet_absent` is a claim about the world and needs evidence - a
+    candidate that was measured and found not to be a pallet. See
+    `word_for_refusals` and the three sets below it.
+  * A standing object that runs off the edge of the image is measured on
+    a PART, so it supports no word that claims something about the whole
+    pallet. An obstruction seen inside the visible region is still an
+    obstruction, so `stringer_in_path` survives clipping.
+
+The output of both rules is silence, which is not `proceed`: the node
+publishes nothing and the dock consumer is told nothing at all.
 """
 from __future__ import annotations
 
@@ -44,6 +65,7 @@ from .contract import (
 )
 from .pocket import (
     DepthFrame,
+    blob_touches_border,
     face_yaw,
     find_pocket_pair,
     fork_path_fraction,
@@ -65,6 +87,86 @@ STRINGER_NEAR_FRAC = 0.06
 # the tag-derived target and should pass it.
 SHIFTED_LATERAL_M = 0.70
 
+# --- WHICH WORD "NO FACE" DESERVES ---------------------------------------
+# `EVIDENCE_M8_C1C2_FIX.md` measured this classifier aborting on 88 % of
+# the frames of two docks `opennav_docking` finished with error 0, and
+# almost all of those aborts were one word: `pallet_absent`, said inside
+# 1.2 m where C1 refuses because the truck's own forks are continuous
+# with the pallet. The bay was not empty. The classifier had no other
+# word and said the wrong one.
+#
+# `pallet_absent` is a CLAIM ABOUT THE WORLD and it needs evidence. The
+# evidence is a candidate that was measured and found not to be a pallet.
+# A refusal that says the frame could not be measured is not evidence of
+# anything, and a refusal that says the pallet may be there and merged
+# with something else is evidence AGAINST the claim.
+#
+# Silence is the correct output when the frame cannot support a word.
+# `proceed` is still not a reason and not a kind: returning None means
+# the node publishes nothing, not that it endorses the dock.
+
+# Measured and not a pallet - the candidate got through the fit and was
+# rejected on its own geometry. This is what an empty bay looks like:
+# the only surface in the window is the floor, or the only things
+# standing in it are the wrong size to be a EUR pallet.
+MEASURED_NOT_A_PALLET = frozenset((
+    "candidate_falls_away_like_a_floor",
+    "face_width_not_pallet_sized",
+    "face_height_not_pallet_sized",
+))
+
+# The pallet may be in this frame and the segmentation could not isolate
+# it. `face_is_too_small_a_share` is E1's finding 2 by name: the face IS
+# there, merged with a second surface, and holds 23-25 % of the blob.
+# Saying `pallet_absent` over this refusal is saying the opposite of what
+# the refusal found.
+COULD_STILL_BE_THE_PALLET = frozenset((
+    "face_is_too_small_a_share",
+))
+
+# Everything else `segment` can raise - too_few_points_in_window,
+# too_few_face_inliers, seed_plane_unsolvable,
+# face_plane_behind_the_camera, no_dominant_plane, empty_frame - says
+# only that there was too little to measure. It neither supports the
+# claim nor blocks it, and it is deliberately not listed: a refusal name
+# added to `pocket` later defaults to saying nothing, which is the safe
+# default for a word policy.
+
+
+def word_for_refusals(frame: DepthFrame, trace: dict) -> Optional[str]:
+    """The word a frame with no segmented face deserves - usually none.
+
+    `trace["refusals"]` is every candidate `segment` tried and the gate
+    that stopped each one. The rule, in the order it is applied:
+
+      1. If ANY candidate could still be the pallet, say nothing. One
+         merged fork-and-pallet blob is enough to make `pallet_absent`
+         false, whatever the other seven candidates were.
+      2. A candidate that was measured and is not pallet-sized is
+         evidence of an empty bay - UNLESS it ran off the edge of the
+         image, because a clipped object reads too narrow or too short
+         for reasons that have nothing to do with what it is. The floor
+         fallback is not a clipped object: it is the whole frame by
+         construction, and it is the purest empty-bay evidence there is.
+      3. With no evidence either way, say nothing.
+
+    Frame-level refusals (`no_dominant_plane`, `empty_frame`) leave the
+    list empty and therefore return None, which is right: a frame with
+    no floor model supports no claim about what is standing on it.
+    """
+    evidence = False
+    for item in trace.get("refusals") or ():
+        why = item.get("why")
+        if why in COULD_STILL_BE_THE_PALLET:
+            return None
+        if why in MEASURED_NOT_A_PALLET:
+            bbox = item.get("blob")
+            if (item.get("standing") and bbox is not None
+                    and blob_touches_border(frame, bbox)):
+                continue
+            evidence = True
+    return "pallet_absent" if evidence else None
+
 
 def classify(frame: DepthFrame,
              target_u: Optional[float] = None,
@@ -76,20 +178,37 @@ def classify(frame: DepthFrame,
     reading if the caller has one. None of them is ground truth and
     none is required - a tagless frame is classified on the range
     window and the floor model alone.
+
+    NO THRESHOLD BELOW MOVED when the word policy was written. What
+    changed is which words the frame is allowed to support: a refusal
+    is not automatically `pallet_absent` (see `word_for_refusals`), and
+    a segment that runs off the edge of the image cannot support a word
+    about the WHOLE object - its yaw, its pocket pair, its lateral
+    offset are all measured on a part. An obstruction seen inside the
+    visible region is still an obstruction, so `stringer_in_path`
+    survives clipping; every word that is a claim about the whole pallet
+    does not.
     """
     valid = frame.valid_count()
     if valid < ABSENT_VALID_FRAC * frame.width * frame.height:
+        # Nothing within range anywhere in the frame - not even a floor.
+        # This is the one reading that is evidence of an empty bay on its
+        # own, and it is also what a blind camera looks like. The word is
+        # kept, and sensor health is m8_health's, not a reason word's.
         return "pallet_absent"
 
+    trace: dict = {}
     seg = segment(frame, expected_range=expected_range,
-                  tag_u=target_u, tag_v=target_v)
+                  tag_u=target_u, tag_v=target_v, trace=trace)
     if seg is None:
-        # No pallet-sized surface stands above the dominant plane. On a
-        # frame that is all floor the fallback candidate IS the floor,
-        # and the dz/dy guard in `segment` is what rejects it.
-        return "pallet_absent"
+        return word_for_refusals(frame, trace)
 
-    if abs(face_yaw(seg.face, seg.up)) > ROTATED_ABS_RAD:
+    # A standing object that runs off the image is measured on a part.
+    # The floor fallback (`seg.floor is None`) is the whole frame by
+    # construction and is not a clipped object.
+    clipped = seg.floor is not None and blob_touches_border(frame, seg.blob)
+
+    if not clipped and abs(face_yaw(seg.face, seg.up)) > ROTATED_ABS_RAD:
         return "pallet_rotated"
 
     if fork_path_fraction(frame, seg, STRINGER_NEAR_M) > STRINGER_NEAR_FRAC:
@@ -97,16 +216,16 @@ def classify(frame: DepthFrame,
 
     pair = find_pocket_pair(frame, seg)
     if pair is None:
-        return "pocket_blocked"
+        return None if clipped else "pocket_blocked"
     u_mid, v_mid, _span = pair
 
     z = seg.face.depth_at(frame.x_of(u_mid), frame.y_of(v_mid))
     if z is None:
-        return "pocket_blocked"
+        return None if clipped else "pocket_blocked"
     tu = frame.cx if target_u is None else float(target_u)
     lateral = (u_mid - tu) / frame.fx * z
     if abs(lateral) > SHIFTED_LATERAL_M:
-        return "pallet_shifted"
+        return None if clipped else "pallet_shifted"
     return None
 
 
