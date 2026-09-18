@@ -1,0 +1,69 @@
+E3 abort classifier vs staged faults - session e3-20260918-122922
+labels: {'traction': 'nominal', 'arm': 'wheel+imu', 'loc': 'amcl@735cdbc6', 'nav': 'on@7f57e6cf', 'dock': 'on@1676eac0', 'docking': 'on@a462315f', 'monitor': 'off', 'partition': 'm5v3', 'log_dir': '/mnt/c/Users/ozkan/projects/amr-agent-m5v3/m5_ver3/logs/run-20260918-122358'}
+frames per condition: 30  ranges:   cycles: 4
+fault set: {'rotated_rad': 0.35, 'shifted_m': 0.3, 'block_ahead_m': 0.06, 'block_z_m': 0.06, 'stringer_ahead_m': 0.6, 'stringer_z_m': 0.03, 'absent_xy': (-17.0, 10.0), 'boxes': {'pocket_blocked': 'm8_pocket_block.sdf', 'stringer_in_path': 'm8_stringer.sdf'}}
+
+abort rate (any reason) = aborts/frames; [exact] = reason names the staged fault
+condition              overall
+clean                      0/0
+pallet_absent              0/0
+pallet_rotated             0/0
+pallet_shifted             0/0
+pocket_blocked             0/0
+stringer_in_path           0/0
+
+camera range per pose: 
+
+confusion (rows: staged condition; cols: classifier word)
+                               none    pallet_absent   pallet_rotated   pallet_shifted   pocket_blocked stringer_in_path
+clean                             0                0                0                0                0                0
+pallet_absent                     0                0                0                0                0                0
+pallet_rotated                    0                0                0                0                0                0
+pallet_shifted                    0                0                0                0                0                0
+pocket_blocked                    0                0                0                0                0                0
+stringer_in_path                  0                0                0                0                0                0
+
+named C1 refusals behind the static words: {}
+clean static frames by range band: {}
+
+clean live cycles (dock_bench.py record --from-staging):
+  cycle 0 plugin success=True error=0 retries=0 truth= m | classified 50 aborts 5 false-abort 0.100 | reasons {'none': 45, 'pallet_absent': 5}
+           pallet readback_ok=1 moved=0.1727 m clean_cycle=False | retries joined 39/50 from 184 feedback rows
+           countable 37 aborts 3 false-abort 0.081
+  cycle 1 plugin success=True error=0 retries=0 truth= m | classified 56 aborts 23 false-abort 0.411 | reasons {'none': 33, 'pallet_absent': 10, 'pallet_rotated': 8, 'pocket_blocked': 4, 'stringer_in_path': 1}
+           pallet readback_ok=1 moved=0.3910 m clean_cycle=False | retries joined 48/56 from 251 feedback rows
+           countable 36 aborts 12 false-abort 0.333
+  cycle 2 plugin success=True error=0 retries=0 truth= m | classified 54 aborts 12 false-abort 0.222 | reasons {'none': 42, 'stringer_in_path': 5, 'pallet_rotated': 5, 'pallet_absent': 2}
+           pallet readback_ok=1 moved=0.4793 m clean_cycle=False | retries joined 44/54 from 228 feedback rows
+           countable 34 aborts 2 false-abort 0.059
+  cycle 3 plugin success=True error=0 retries=0 truth= m | classified 43 aborts 3 false-abort 0.070 | reasons {'none': 40, 'pallet_absent': 3}
+           pallet readback_ok=1 moved=0.0676 m clean_cycle=False | retries joined 33/43 from 166 feedback rows
+           countable 33 aborts 3 false-abort 0.091
+  overall classified 203 aborts 43 false-abort 0.212
+  refusals behind those words: {'(segmented)': 178, 'face_width_not_pallet_sized': 13, 'candidate_falls_away_like_a_floor': 10, 'too_few_points_in_window': 2}
+
+live frames by range band (all cycles):
+  staging       0/81   = 0.000  reasons {'none': 81}
+             refusals {'(segmented)': 81}
+  approach      0/57   = 0.000  reasons {'none': 57}
+             refusals {'(segmented)': 57}
+  close        43/65   = 0.662  reasons {'none': 22, 'pallet_absent': 20, 'pallet_rotated': 13, 'stringer_in_path': 6, 'pocket_blocked': 4}
+             refusals {'(segmented)': 40, 'face_width_not_pallet_sized': 13, 'candidate_falls_away_like_a_floor': 10, 'too_few_points_in_window': 2}
+
+INTERIM BAR POPULATION - num_retries == 0, joined from the dock session's feedback.csv, on a frame whose pallet was read back and was within 0.02 m of where the cycle started, AT THAT FRAME
+  classified 140 aborts 20 false-abort 0.143
+  reasons {'none': 120, 'pallet_absent': 10, 'pallet_rotated': 5, 'pocket_blocked': 4, 'stringer_in_path': 1}
+  refusals {'(segmented)': 125, 'face_width_not_pallet_sized': 9, 'candidate_falls_away_like_a_floor': 5, 'too_few_points_in_window': 1}
+  by band {'staging': '0/42', 'approach': '0/57', 'close': '20/41'}
+  excluded and reported separately: on a retry 0, retry count unjoined 39, pallet moved or unread 24
+
+AS WIRED - same frames, classified twice: baseline, then fork self-mask + tag-derived target as the nodes run it
+  static frames            paired 0 (stale 0, absent 0) | aborts 0 -> 0 | segmented gained 0 lost 0
+  all live frames          paired 203 (stale 106, absent 0) | aborts 43 -> 23 | segmented gained 0 lost 0
+                           words that moved: {'pallet_absent -> none': 11, 'pallet_rotated -> none': 7, 'none -> pocket_blocked': 2, 'pocket_blocked -> none': 2, 'stringer_in_path -> none': 2}
+                           by band: {'staging': '0->0 of 81', 'approach': '0->0 of 57', 'close': '43->23 of 65'}
+  interim bar population   paired 140 (stale 70, absent 0) | aborts 20 -> 13 | segmented gained 0 lost 0
+                           words that moved: {'pallet_absent -> none': 5, 'none -> pocket_blocked': 2, 'pocket_blocked -> none': 2, 'pallet_rotated -> none': 2}
+                           by band: {'staging': '0->0 of 42', 'approach': '0->0 of 57', 'close': '20->13 of 41'}
+
+classify latency s: median 0.074 max 0.119 n 203

@@ -1,0 +1,742 @@
+{
+  "bench": "e3_abort",
+  "cycles": 4,
+  "frames_per_condition": 30,
+  "ranges": "",
+  "session": "e3-20260918-123209",
+  "settle_s": 2.0,
+  "summary": {
+    "as_wired": {
+      "cycles": {
+        "aborts_unmasked": 684,
+        "aborts_wired": 351,
+        "by_regime": {
+          "approach": {
+            "aborts_unmasked": 98,
+            "aborts_wired": 48,
+            "paired": 180
+          },
+          "close": {
+            "aborts_unmasked": 530,
+            "aborts_wired": 284,
+            "paired": 584
+          },
+          "staging": {
+            "aborts_unmasked": 8,
+            "aborts_wired": 4,
+            "paired": 89
+          }
+        },
+        "mask_stale": 430,
+        "nothing_wired": 0,
+        "paired": 901,
+        "population": "all live frames",
+        "segmented_gained": 82,
+        "segmented_lost": 0,
+        "word_moves": {
+          "none -> pallet_absent": 4,
+          "pallet_absent -> none": 242,
+          "pallet_absent -> pallet_rotated": 35,
+          "pallet_absent -> pocket_blocked": 5,
+          "pallet_rotated -> none": 91,
+          "pocket_blocked -> none": 2,
+          "stringer_in_path -> none": 2
+        }
+      },
+      "cycles_countable": {
+        "aborts_unmasked": 49,
+        "aborts_wired": 16,
+        "by_regime": {
+          "approach": {
+            "aborts_unmasked": 2,
+            "aborts_wired": 0,
+            "paired": 58
+          },
+          "close": {
+            "aborts_unmasked": 47,
+            "aborts_wired": 16,
+            "paired": 54
+          },
+          "staging": {
+            "aborts_unmasked": 0,
+            "aborts_wired": 0,
+            "paired": 40
+          }
+        },
+        "mask_stale": 72,
+        "nothing_wired": 0,
+        "paired": 152,
+        "population": "interim bar population",
+        "segmented_gained": 23,
+        "segmented_lost": 0,
+        "word_moves": {
+          "pallet_absent -> none": 31,
+          "pallet_absent -> pallet_rotated": 1,
+          "pallet_absent -> pocket_blocked": 5,
+          "stringer_in_path -> none": 2
+        }
+      },
+      "static": {
+        "aborts_unmasked": 0,
+        "aborts_wired": 0,
+        "by_regime": {},
+        "mask_stale": 0,
+        "nothing_wired": 0,
+        "paired": 0,
+        "population": "static frames",
+        "segmented_gained": 0,
+        "segmented_lost": 0,
+        "word_moves": {}
+      }
+    },
+    "confusion": {
+      "clean": {
+        "none": 0,
+        "pallet_absent": 0,
+        "pallet_rotated": 0,
+        "pallet_shifted": 0,
+        "pocket_blocked": 0,
+        "stringer_in_path": 0
+      },
+      "pallet_absent": {
+        "none": 0,
+        "pallet_absent": 0,
+        "pallet_rotated": 0,
+        "pallet_shifted": 0,
+        "pocket_blocked": 0,
+        "stringer_in_path": 0
+      },
+      "pallet_rotated": {
+        "none": 0,
+        "pallet_absent": 0,
+        "pallet_rotated": 0,
+        "pallet_shifted": 0,
+        "pocket_blocked": 0,
+        "stringer_in_path": 0
+      },
+      "pallet_shifted": {
+        "none": 0,
+        "pallet_absent": 0,
+        "pallet_rotated": 0,
+        "pallet_shifted": 0,
+        "pocket_blocked": 0,
+        "stringer_in_path": 0
+      },
+      "pocket_blocked": {
+        "none": 0,
+        "pallet_absent": 0,
+        "pallet_rotated": 0,
+        "pallet_shifted": 0,
+        "pocket_blocked": 0,
+        "stringer_in_path": 0
+      },
+      "stringer_in_path": {
+        "none": 0,
+        "pallet_absent": 0,
+        "pallet_rotated": 0,
+        "pallet_shifted": 0,
+        "pocket_blocked": 0,
+        "stringer_in_path": 0
+      }
+    },
+    "cycle_by_regime": {
+      "approach": {
+        "abort": 98,
+        "n": 180,
+        "rate": 0.5444444444444444,
+        "reasons": {
+          "none": 82,
+          "pallet_absent": 9,
+          "pallet_rotated": 86,
+          "pocket_blocked": 1,
+          "stringer_in_path": 2
+        },
+        "refusals": {
+          "(segmented)": 162,
+          "candidate_falls_away_like_a_floor": 13,
+          "face_width_not_pallet_sized": 5
+        }
+      },
+      "close": {
+        "abort": 530,
+        "n": 584,
+        "rate": 0.9075342465753424,
+        "reasons": {
+          "none": 54,
+          "pallet_absent": 438,
+          "pallet_rotated": 89,
+          "pocket_blocked": 3
+        },
+        "refusals": {
+          "(segmented)": 128,
+          "candidate_falls_away_like_a_floor": 262,
+          "face_width_not_pallet_sized": 102,
+          "seed_plane_unsolvable": 2,
+          "too_few_face_inliers": 2,
+          "too_few_points_in_window": 88
+        }
+      },
+      "staging": {
+        "abort": 8,
+        "n": 89,
+        "rate": 0.0898876404494382,
+        "reasons": {
+          "none": 81,
+          "pallet_absent": 1,
+          "pallet_rotated": 7
+        },
+        "refusals": {
+          "(segmented)": 79,
+          "candidate_falls_away_like_a_floor": 1,
+          "face_is_too_small_a_share": 5,
+          "face_width_not_pallet_sized": 4
+        }
+      },
+      "unknown": {
+        "abort": 48,
+        "n": 48,
+        "rate": 1.0,
+        "reasons": {
+          "pallet_absent": 48
+        },
+        "refusals": {
+          "candidate_falls_away_like_a_floor": 30,
+          "face_width_not_pallet_sized": 15,
+          "too_few_points_in_window": 3
+        }
+      }
+    },
+    "cycle_countable": {
+      "aborts": 49,
+      "by_regime": {
+        "approach": {
+          "abort": 2,
+          "n": 58,
+          "rate": 0.034482758620689655,
+          "reasons": {
+            "none": 56,
+            "stringer_in_path": 2
+          },
+          "refusals": {
+            "(segmented)": 58
+          }
+        },
+        "close": {
+          "abort": 47,
+          "n": 54,
+          "rate": 0.8703703703703703,
+          "reasons": {
+            "none": 7,
+            "pallet_absent": 47
+          },
+          "refusals": {
+            "candidate_falls_away_like_a_floor": 19,
+            "face_width_not_pallet_sized": 23,
+            "too_few_points_in_window": 12
+          }
+        },
+        "staging": {
+          "abort": 0,
+          "n": 40,
+          "rate": 0.0,
+          "reasons": {
+            "none": 40
+          },
+          "refusals": {
+            "(segmented)": 40
+          }
+        }
+      },
+      "classified": 152,
+      "definition": "num_retries == 0, joined from the dock session's feedback.csv, on a frame whose pallet was read back and was within 0.02 m of where the cycle started, AT THAT FRAME",
+      "false_abort_rate": 0.3223684210526316,
+      "reasons": {
+        "none": 103,
+        "pallet_absent": 47,
+        "stringer_in_path": 2
+      },
+      "refusals": {
+        "(segmented)": 98,
+        "candidate_falls_away_like_a_floor": 19,
+        "face_width_not_pallet_sized": 23,
+        "too_few_points_in_window": 12
+      }
+    },
+    "cycle_excluded": {
+      "note": "reported, never folded in: a frame whose retry count the bench could not reach is unknown, not zero",
+      "on_a_retry": 487,
+      "pallet_moved_or_unread": 230,
+      "retry_unjoined": 32
+    },
+    "cycle_overall": {
+      "aborts": 684,
+      "classified": 901,
+      "false_abort_rate": 0.7591564927857936,
+      "reasons": {
+        "none": 217,
+        "pallet_absent": 496,
+        "pallet_rotated": 182,
+        "pocket_blocked": 4,
+        "stringer_in_path": 2
+      },
+      "refusals": {
+        "(segmented)": 369,
+        "candidate_falls_away_like_a_floor": 306,
+        "face_is_too_small_a_share": 5,
+        "face_width_not_pallet_sized": 126,
+        "seed_plane_unsolvable": 2,
+        "too_few_face_inliers": 2,
+        "too_few_points_in_window": 91
+      }
+    },
+    "cycles": [
+      {
+        "aborts": 644,
+        "by_regime": {
+          "approach": {
+            "abort": 96,
+            "n": 136,
+            "rate": 0.7058823529411765,
+            "reasons": {
+              "none": 40,
+              "pallet_absent": 9,
+              "pallet_rotated": 86,
+              "pocket_blocked": 1
+            },
+            "refusals": {
+              "(segmented)": 118,
+              "candidate_falls_away_like_a_floor": 13,
+              "face_width_not_pallet_sized": 5
+            }
+          },
+          "close": {
+            "abort": 492,
+            "n": 539,
+            "rate": 0.9128014842300557,
+            "reasons": {
+              "none": 47,
+              "pallet_absent": 404,
+              "pallet_rotated": 85,
+              "pocket_blocked": 3
+            },
+            "refusals": {
+              "(segmented)": 122,
+              "candidate_falls_away_like_a_floor": 245,
+              "face_width_not_pallet_sized": 83,
+              "seed_plane_unsolvable": 2,
+              "too_few_face_inliers": 2,
+              "too_few_points_in_window": 85
+            }
+          },
+          "staging": {
+            "abort": 8,
+            "n": 33,
+            "rate": 0.24242424242424243,
+            "reasons": {
+              "none": 25,
+              "pallet_absent": 1,
+              "pallet_rotated": 7
+            },
+            "refusals": {
+              "(segmented)": 23,
+              "candidate_falls_away_like_a_floor": 1,
+              "face_is_too_small_a_share": 5,
+              "face_width_not_pallet_sized": 4
+            }
+          },
+          "unknown": {
+            "abort": 48,
+            "n": 48,
+            "rate": 1.0,
+            "reasons": {
+              "pallet_absent": 48
+            },
+            "refusals": {
+              "candidate_falls_away_like_a_floor": 30,
+              "face_width_not_pallet_sized": 15,
+              "too_few_points_in_window": 3
+            }
+          }
+        },
+        "classified": 756,
+        "clean_cycle": false,
+        "countable": 51,
+        "countable_aborts": 24,
+        "countable_false_abort_rate": 0.47058823529411764,
+        "cycle": 0,
+        "dock_session": "dock-s5-20260918-123615",
+        "error": 0,
+        "false_abort_rate": 0.8518518518518519,
+        "feedback_rows": 4335,
+        "num_retries": 3,
+        "pallet_after": [
+          7.20196,
+          2.31455,
+          0.072,
+          -0.0,
+          -0.0,
+          2.34021
+        ],
+        "pallet_before": [
+          6.9998,
+          3.03,
+          0.072,
+          -0.0,
+          -0.0,
+          1.5708
+        ],
+        "pallet_moved_m": 0.7434630912829497,
+        "pallet_readback_ok": 1,
+        "pallet_reads": 73,
+        "reasons": {
+          "none": 112,
+          "pallet_absent": 462,
+          "pallet_rotated": 178,
+          "pocket_blocked": 4
+        },
+        "record_rc": 0,
+        "refusals": {
+          "(segmented)": 263,
+          "candidate_falls_away_like_a_floor": 289,
+          "face_is_too_small_a_share": 5,
+          "face_width_not_pallet_sized": 107,
+          "seed_plane_unsolvable": 2,
+          "too_few_face_inliers": 2,
+          "too_few_points_in_window": 88
+        },
+        "retry_joined": 751,
+        "stage_rc": 0,
+        "success": true,
+        "truth_m": null,
+        "wall_s": 227.523104429245
+      },
+      {
+        "aborts": 7,
+        "by_regime": {
+          "approach": {
+            "abort": 0,
+            "n": 14,
+            "rate": 0.0,
+            "reasons": {
+              "none": 14
+            },
+            "refusals": {
+              "(segmented)": 14
+            }
+          },
+          "close": {
+            "abort": 7,
+            "n": 8,
+            "rate": 0.875,
+            "reasons": {
+              "none": 1,
+              "pallet_absent": 7
+            },
+            "refusals": {
+              "candidate_falls_away_like_a_floor": 2,
+              "face_width_not_pallet_sized": 4,
+              "too_few_points_in_window": 2
+            }
+          },
+          "staging": {
+            "abort": 0,
+            "n": 20,
+            "rate": 0.0,
+            "reasons": {
+              "none": 20
+            },
+            "refusals": {
+              "(segmented)": 20
+            }
+          }
+        },
+        "classified": 42,
+        "clean_cycle": true,
+        "countable": 32,
+        "countable_aborts": 7,
+        "countable_false_abort_rate": 0.21875,
+        "cycle": 1,
+        "dock_session": "dock-s5-20260918-123642",
+        "error": 0,
+        "false_abort_rate": 0.16666666666666666,
+        "feedback_rows": 161,
+        "num_retries": 0,
+        "pallet_after": [
+          6.99922,
+          3.02995,
+          0.072,
+          -0.0,
+          -0.0,
+          1.57075
+        ],
+        "pallet_before": [
+          7.0,
+          3.03,
+          0.072,
+          0.0,
+          0.0,
+          1.5708
+        ],
+        "pallet_moved_m": 0.0007816009211865391,
+        "pallet_readback_ok": 1,
+        "pallet_reads": 5,
+        "reasons": {
+          "none": 35,
+          "pallet_absent": 7
+        },
+        "record_rc": 0,
+        "refusals": {
+          "(segmented)": 34,
+          "candidate_falls_away_like_a_floor": 2,
+          "face_width_not_pallet_sized": 4,
+          "too_few_points_in_window": 2
+        },
+        "retry_joined": 32,
+        "stage_rc": 0,
+        "success": true,
+        "truth_m": null,
+        "wall_s": 14.88614296913147
+      },
+      {
+        "aborts": 7,
+        "by_regime": {
+          "approach": {
+            "abort": 1,
+            "n": 15,
+            "rate": 0.06666666666666667,
+            "reasons": {
+              "none": 14,
+              "stringer_in_path": 1
+            },
+            "refusals": {
+              "(segmented)": 15
+            }
+          },
+          "close": {
+            "abort": 6,
+            "n": 9,
+            "rate": 0.6666666666666666,
+            "reasons": {
+              "none": 3,
+              "pallet_absent": 6
+            },
+            "refusals": {
+              "candidate_falls_away_like_a_floor": 2,
+              "face_width_not_pallet_sized": 6,
+              "too_few_points_in_window": 1
+            }
+          },
+          "staging": {
+            "abort": 0,
+            "n": 18,
+            "rate": 0.0,
+            "reasons": {
+              "none": 18
+            },
+            "refusals": {
+              "(segmented)": 18
+            }
+          }
+        },
+        "classified": 42,
+        "clean_cycle": false,
+        "countable": 33,
+        "countable_aborts": 7,
+        "countable_false_abort_rate": 0.21212121212121213,
+        "cycle": 2,
+        "dock_session": "dock-s5-20260918-123709",
+        "error": 0,
+        "false_abort_rate": 0.16666666666666666,
+        "feedback_rows": 163,
+        "num_retries": 0,
+        "pallet_after": [
+          6.99902,
+          2.92612,
+          0.072,
+          -0.0,
+          -0.0,
+          1.57246
+        ],
+        "pallet_before": [
+          6.99979,
+          3.03,
+          0.072,
+          -0.0,
+          0.0,
+          1.5708
+        ],
+        "pallet_moved_m": 0.10388285373438655,
+        "pallet_readback_ok": 1,
+        "pallet_reads": 5,
+        "reasons": {
+          "none": 35,
+          "pallet_absent": 6,
+          "stringer_in_path": 1
+        },
+        "record_rc": 0,
+        "refusals": {
+          "(segmented)": 33,
+          "candidate_falls_away_like_a_floor": 2,
+          "face_width_not_pallet_sized": 6,
+          "too_few_points_in_window": 1
+        },
+        "retry_joined": 33,
+        "stage_rc": 0,
+        "success": true,
+        "truth_m": null,
+        "wall_s": 14.993317127227783
+      },
+      {
+        "aborts": 26,
+        "by_regime": {
+          "approach": {
+            "abort": 1,
+            "n": 15,
+            "rate": 0.06666666666666667,
+            "reasons": {
+              "none": 14,
+              "stringer_in_path": 1
+            },
+            "refusals": {
+              "(segmented)": 15
+            }
+          },
+          "close": {
+            "abort": 25,
+            "n": 28,
+            "rate": 0.8928571428571429,
+            "reasons": {
+              "none": 3,
+              "pallet_absent": 21,
+              "pallet_rotated": 4
+            },
+            "refusals": {
+              "(segmented)": 6,
+              "candidate_falls_away_like_a_floor": 13,
+              "face_width_not_pallet_sized": 9
+            }
+          },
+          "staging": {
+            "abort": 0,
+            "n": 18,
+            "rate": 0.0,
+            "reasons": {
+              "none": 18
+            },
+            "refusals": {
+              "(segmented)": 18
+            }
+          }
+        },
+        "classified": 61,
+        "clean_cycle": false,
+        "countable": 36,
+        "countable_aborts": 11,
+        "countable_false_abort_rate": 0.3055555555555556,
+        "cycle": 3,
+        "dock_session": "dock-s5-20260918-123742",
+        "error": 0,
+        "false_abort_rate": 0.4262295081967213,
+        "feedback_rows": 286,
+        "num_retries": 0,
+        "pallet_after": [
+          7.00931,
+          2.67668,
+          0.072,
+          0.0,
+          -0.0,
+          1.54813
+        ],
+        "pallet_before": [
+          6.99981,
+          3.03,
+          0.072,
+          -0.0,
+          -0.0,
+          1.5708
+        ],
+        "pallet_moved_m": 0.353447694008604,
+        "pallet_readback_ok": 1,
+        "pallet_reads": 7,
+        "reasons": {
+          "none": 35,
+          "pallet_absent": 21,
+          "pallet_rotated": 4,
+          "stringer_in_path": 1
+        },
+        "record_rc": 0,
+        "refusals": {
+          "(segmented)": 39,
+          "candidate_falls_away_like_a_floor": 13,
+          "face_width_not_pallet_sized": 9
+        },
+        "retry_joined": 53,
+        "stage_rc": 0,
+        "success": true,
+        "truth_m": null,
+        "wall_s": 21.147156238555908
+      }
+    ],
+    "static_by_pose": {},
+    "static_by_regime": {},
+    "static_overall": {
+      "clean": {
+        "abort": 0,
+        "exact": 0,
+        "exact_rate": null,
+        "n": 0,
+        "rate": null,
+        "reasons": {}
+      },
+      "pallet_absent": {
+        "abort": 0,
+        "exact": 0,
+        "exact_rate": null,
+        "n": 0,
+        "rate": null,
+        "reasons": {}
+      },
+      "pallet_rotated": {
+        "abort": 0,
+        "exact": 0,
+        "exact_rate": null,
+        "n": 0,
+        "rate": null,
+        "reasons": {}
+      },
+      "pallet_shifted": {
+        "abort": 0,
+        "exact": 0,
+        "exact_rate": null,
+        "n": 0,
+        "rate": null,
+        "reasons": {}
+      },
+      "pocket_blocked": {
+        "abort": 0,
+        "exact": 0,
+        "exact_rate": null,
+        "n": 0,
+        "rate": null,
+        "reasons": {}
+      },
+      "stringer_in_path": {
+        "abort": 0,
+        "exact": 0,
+        "exact_rate": null,
+        "n": 0,
+        "rate": null,
+        "reasons": {}
+      }
+    },
+    "static_refusals": {},
+    "t_classify_s": {
+      "max": 0.13452145300004759,
+      "mean": 0.08074366712652854,
+      "median": 0.0801648030000024,
+      "min": 0.041185034000022824,
+      "n": 901,
+      "rms": 0.08187089809454547
+    }
+  }
+}
