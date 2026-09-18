@@ -385,17 +385,15 @@ def _sample(frame: DepthFrame, stride: int) -> List[Tuple[float, float, float]]:
 
 
 # ---------------------------------------------------------- segmentation
-def dominant_plane(frame: DepthFrame) -> Optional[Plane]:
-    """The plane most of the frame lies on. On the plant that is the floor.
+def _trim_to_surface(samples: Sequence[Tuple[float, float, float]],
+                     plane: Optional[Plane]) -> Optional[Plane]:
+    """Walk a fit onto the majority surface of `samples`.
 
-    Trimmed least squares in inverse depth: each pass keeps the points
-    within max(5 cm, the median absolute residual) of the current plane,
-    so the fit walks onto the majority surface instead of averaging the
-    surfaces together the way A1's single unweighted pass did.
+    Each pass keeps the points within max(5 cm, the median absolute
+    residual) of the current plane, so the fit lands on one surface
+    instead of averaging the surfaces together the way A1's single
+    unweighted pass did.
     """
-    coarse, _ = _strides(frame)
-    samples = _sample(frame, coarse)
-    plane = _fit_plane(samples)
     if plane is None:
         return None
     for _ in range(DOMINANT_TRIM_PASSES):
@@ -410,6 +408,90 @@ def dominant_plane(frame: DepthFrame) -> Optional[Plane]:
         plane = refit
         samples = kept
     return plane
+
+
+def dominant_plane(frame: DepthFrame) -> Optional[Plane]:
+    """The FLOOR: the farthest surface, not the biggest one.
+
+    THE BIGGEST SURFACE IS NOT ALWAYS THE FLOOR, and the plant measured
+    exactly where it stops being it. Every height in this module is a
+    residual against this plane, so a plane that is not the floor
+    mismeasures every height in the frame and nothing downstream can
+    tell. `e3-20260918-141014`, static grid, teleported poses, `clean`
+    against `pallet_absent` at the same four poses:
+
+        pose     clean dz/dy   empty bay dz/dy
+        1.00 m      -3.723         -3.797
+        0.90 m      -3.553         -3.790
+        0.80 m      -2.599         -3.789
+        0.70 m      -2.334         -3.783
+
+    With the bay EMPTY the fit reads this rig's floor at -3.8 at every
+    pose. With a pallet in it, from 0.90 m in, the pallet's own deck
+    top - 0.8 m deep, 1.2 m wide, and a growing share of the image as
+    the truck closes - drags the majority fit off the floor and up onto
+    itself: the plane's depth on the optical axis came out 1.942 m
+    against the empty bay's 2.194 m at the 0.80 m pose. `clean` false
+    aborts at that pose were 20 of 20.
+
+    THE FLOOR IS WHAT EVERYTHING ELSE STANDS ON. It is opaque and the
+    world rests on top of it, so along any ray there is nothing behind
+    it: a plane with a surface BEHIND it is not the ground, it is
+    something standing on the ground. So the fit steps back - re-fit on
+    whatever lies deeper than the current plane, and repeat - and what
+    it converges on is the farthest coherent surface in the frame.
+
+    Each step only ever moves AWAY from the camera, the tolerance is
+    the same trim tolerance the majority fit already uses, the
+    population bar is `MIN_PLANE_POINTS` (the solver's own minimum) and
+    the loop is bounded by `DOMINANT_TRIM_PASSES`. No new number.
+    """
+    coarse, _ = _strides(frame)
+    samples = _sample(frame, coarse)
+    plane = _trim_to_surface(samples, _fit_plane(samples))
+    if plane is None:
+        return None
+    # The candidates: the majority surface, then whatever lies behind
+    # it, then whatever lies behind that. `_residuals_m` is measured
+    # depth minus plane depth, so a POSITIVE residual is a point deeper
+    # than the plane claims - a point UNDER the ground, if the plane
+    # were the ground.
+    # THE COMPARISON HAPPENS INSIDE THE DOCK ENVELOPE AND THE FIT DOES
+    # NOT. The fit is in INVERSE depth, so a residual read in metres
+    # grows with range for a fixed error in the quantity actually
+    # fitted: at 6 m the far floor sits "under" its own plane by more
+    # than `OBJECT_CLEARANCE_M` on noise alone, and a test scored over
+    # the whole frame would reject every correct floor. The envelope is
+    # where the dock happens and is already what every other gate here
+    # is measured in; the PLANE still comes from the whole frame,
+    # because a floor is fitted best over as much floor as there is.
+    lo, hi = DOCK_ENVELOPE_M
+    near = [s for s in samples if lo <= s[2] <= hi]
+    chain = [plane]
+    behind = near
+    for _ in range(DOMINANT_TRIM_PASSES):
+        behind = [s for s, r in _residuals_m(behind, chain[-1])
+                  if r > OBJECT_CLEARANCE_M]
+        if len(behind) < MIN_PLANE_POINTS:
+            break
+        stepped = _trim_to_surface(behind, _fit_plane(behind))
+        if stepped is None:
+            break
+        chain.append(stepped)
+    if len(chain) == 1:
+        return plane
+    # WHICH OF THEM IS THE GROUND. The one with the least still under
+    # it. `OBJECT_CLEARANCE_M` is already this module's "nearer than
+    # the dominant plane by this much means it stands on it"; its
+    # mirror is a point the plane says is BELOW the ground, which is
+    # not a thing a floor has. Ties - and a correct floor ties at
+    # nearly zero with any sliver of itself - go to the plane with the
+    # most support, so a good fit is never traded for a far scrap.
+    def under(candidate: Plane) -> int:
+        return sum(1 for _s, r in _residuals_m(near, candidate)
+                   if r > OBJECT_CLEARANCE_M)
+
+    return min(chain, key=lambda c: (under(c), -c.n))
 
 
 def range_window(expected_range: Optional[float] = None

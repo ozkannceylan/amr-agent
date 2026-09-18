@@ -140,6 +140,19 @@ INSTRUMENT_FIELDS = (
     "fork_knowledge", "refused_width_m", "refused_height_m",
     "refused_deck_cut_m", "occluder_points", "share_denominator",
     "corridor_cells", "corridor_component",
+    # --- WHAT THE FRAME THOUGHT THE FLOOR WAS ------------------------
+    # `segment` has always traced these three and no bench has ever
+    # written them down. Every height in `m8_core` is measured against
+    # the dominant plane, so a frame that fitted the wrong plane
+    # mismeasures every height it reports and nothing downstream can
+    # tell. On this rig the floor's dz/dy is about -3.8 and a standing
+    # face reads +0.7...+1.5 (`pocket.FACE_MIN_DZ_DY`), so the sign and
+    # size of this column say WHICH surface the frame called the floor.
+    "floor_dz_dy", "floor_depth_on_axis_m", "floor_points",
+    # The refused candidate's own blob, so "is it clipped" and "how big
+    # is it" stop being inferences.
+    "refused_blob_u0", "refused_blob_u1",
+    "refused_blob_v0", "refused_blob_v1",
 )
 
 STATIC_FIELDS = (
@@ -273,10 +286,17 @@ def classify_frame(frame, self_mask=None, also_wired=False):
         "occluder_points": trace.get("occluder_points"),
         "share_denominator": trace.get("share_denominator"),
     }
+    out["floor_dz_dy"] = trace.get("floor_dz_dy")
+    out["floor_depth_on_axis_m"] = trace.get("floor_depth_on_axis_m")
+    out["floor_points"] = trace.get("floor_points")
     last = (trace.get("refusals") or [{}])[-1]
     out["refused_width_m"] = last.get("width_m")
     out["refused_height_m"] = last.get("height_m")
     out["refused_deck_cut_m"] = last.get("deck_cut")
+    blob = last.get("blob")
+    if blob:
+        (out["refused_blob_u0"], out["refused_blob_u1"],
+         out["refused_blob_v0"], out["refused_blob_v1"]) = blob
     if seg is not None:
         ctrace = {}
         corridor_obstruction(df, seg, STRINGER_NEAR_M, ctrace)

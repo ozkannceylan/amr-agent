@@ -327,3 +327,69 @@ def test_an_occluder_inside_the_seed_band_is_not_removed():
     assert trace["occluder_points"] < 0.05 * trace["after_deck_cut"]
     assert seg is None
     assert trace["refused"] == "candidate_falls_away_like_a_floor"
+
+
+# ------------------------------------------- the floor, and what it is not
+# `e3-20260918-141014`, plant static grid, teleported poses, `clean`
+# against `pallet_absent` at the same four poses:
+#
+#     pose     clean dz/dy   empty bay dz/dy
+#     1.00 m      -3.723         -3.797
+#     0.90 m      -3.553         -3.790
+#     0.80 m      -2.599         -3.789
+#     0.70 m      -2.334         -3.783
+#
+# With the bay empty the fit reads this rig's floor at -3.8 at every
+# pose. With a pallet in it, from 0.90 m in, the pallet's own deck top
+# drags the majority fit up onto itself. Every height in this module is
+# a residual against that plane, so `clean` false aborts at the 0.80 m
+# pose were 20 of 20.
+#
+# The renderer does NOT reproduce that drift - it read -3.79 at every
+# one of those poses - so these tests pin the INVARIANT rather than the
+# regime. The plant is the score and `EVIDENCE_M8_E3_FLOOR.md` is where
+# the regime is measured.
+@pytest.mark.parametrize("distance", [scenes.STAGING_M, scenes.APPROACH_M,
+                                      scenes.CLOSE_M, 0.9, 0.8, 0.7])
+def test_the_pallet_does_not_become_the_floor(distance):
+    """The plane a full bay fits is the plane an empty one fits."""
+    full, _s = scenes.clean(distance)
+    empty, _s2 = scenes.absent(distance)
+    a = pocket.dominant_plane(full)
+    b = pocket.dominant_plane(empty)
+    assert a is not None and b is not None
+    # Same surface, measured two ways: the tilt down the image and the
+    # depth on the optical axis. Nothing here is a literal off the rig.
+    assert abs(a.dz_dy(0.0, 0.0) - b.dz_dy(0.0, 0.0)) < 0.1
+    assert abs(a.depth_at(0.0, 0.0) - b.depth_at(0.0, 0.0)) < 0.05
+    assert a.dz_dy(0.0, 0.0) < pocket.FACE_MIN_DZ_DY
+
+
+def test_a_bigger_nearer_surface_does_not_become_the_floor():
+    """The floor is the farthest surface, not the biggest one.
+
+    Two fronto-parallel surfaces, the near one holding 60 % of the
+    pixels. Nothing stands behind a floor, so the far one is the
+    ground and the near one is an object on it - whichever has more
+    pixels, because pixels are an accident of range.
+    """
+    w, h = 64, 48
+    near = pocket.make_plane_depth(w, h, 1.0)
+    depths = list(near.depths)
+    for v in range(0, int(0.4 * h)):
+        for u in range(w):
+            depths[v * w + u] = 2.0
+    frame = pocket.DepthFrame(w, h, tuple(depths), near.fx, near.fy,
+                              near.cx, near.cy, "two_surfaces", 1.0)
+    plane = pocket.dominant_plane(frame)
+    assert plane is not None
+    assert abs(plane.depth_at(0.0, 0.0) - 2.0) < 0.05
+
+
+def test_one_surface_is_still_that_surface():
+    """A frame with nothing behind anything does not move."""
+    frame = pocket.make_plane_depth(64, 48, 1.4)
+    plane = pocket.dominant_plane(frame)
+    assert plane is not None
+    assert abs(plane.depth_at(0.0, 0.0) - 1.4) < 0.01
+    assert plane.n > 0.5 * 64 * 48
