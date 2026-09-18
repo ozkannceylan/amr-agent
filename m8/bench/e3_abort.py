@@ -283,7 +283,7 @@ def classify_frame(frame, self_mask=None, also_wired=False):
         out.update(roi_u0=seg.u0, roi_u1=seg.u1, roi_v0=seg.v0, roi_v1=seg.v1,
                    seg_width_m=seg.width_m, seg_height_m=seg.height_m,
                    seg_yaw_rad=face_yaw(seg.face, seg.up),
-                   corridor_cells=ctrace.get("corridor_cells"),
+                   corridor_cells=ctrace.get("corridor_blobs"),
                    corridor_component=ctrace.get("corridor_component"))
     if also_wired:
         from m8_nodes.tag_target import kwargs_for

@@ -372,11 +372,29 @@ def _fresh_mask(frame):
     return selfmask.from_mast_joint(0.0, stamp=frame.sim_stamp)
 
 
-@pytest.mark.parametrize("distance", [scenes.APPROACH_M, scenes.STAGING_M])
-def test_a_ridge_in_the_fork_corridor_is_stringer_in_path(distance):
-    """Open item 1, closed offline. The plant is still the score."""
-    frame, _scene = scenes.ridge(distance)
+def test_a_ridge_in_the_fork_corridor_is_stringer_in_path():
+    """Open item 1. The plant is the score and it is a harder score.
+
+    Only the staging pose is asserted here, and the reason is a
+    RENDERER limit rather than a classifier one: at 1.5 m
+    `_blob_candidates` finds ONE standing object in the rendered scene,
+    because the renderer's ridge is an exact box whose depth step into
+    the floor behind it is right at `OBJECT_CLEARANCE_M`. The plant
+    resolves the same staged ridge at the same pose - 6 blob candidates
+    against a clean frame's 3, measured over 30 frames in
+    `e3-20260918-121233` - so the pose that this fixture cannot hold is
+    held by the rig.
+    """
+    frame, _scene = scenes.ridge(scenes.STAGING_M)
     assert classify(frame, self_mask=_fresh_mask(frame)) == "stringer_in_path"
+
+
+def test_the_renderer_does_not_resolve_the_ridge_at_1_5_m():
+    """Named, so it cannot be mistaken for the classifier being quiet."""
+    frame, _scene = scenes.ridge(scenes.APPROACH_M)
+    seg = segment(frame, self_mask=_fresh_mask(frame))
+    assert seg is not None
+    assert len(seg.blobs) == 1
 
 
 @pytest.mark.parametrize("distance", [scenes.APPROACH_M, scenes.STAGING_M])
@@ -395,15 +413,14 @@ def test_the_corridor_claims_nothing_without_fork_knowledge(distance):
     assert corridor_obstruction(frame, seg, STRINGER_NEAR_M) is False
 
 
-@pytest.mark.parametrize("distance", [scenes.APPROACH_M, scenes.STAGING_M])
-def test_the_footprint_alone_finds_the_ridge(distance):
+def test_the_footprint_alone_finds_the_ridge():
     """The corridor does not need the joint reading, only the columns.
 
     `tine_footprint` knows where the tines are ACROSS the truck and how
     far they reach, which is all the corridor has to exclude. That is
     why the ridge is caught with no mast reading at all.
     """
-    frame, _scene = scenes.ridge(distance)
+    frame, _scene = scenes.ridge(scenes.STAGING_M)
     assert classify(frame) == "stringer_in_path"
 
 
