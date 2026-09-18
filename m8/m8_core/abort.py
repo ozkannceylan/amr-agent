@@ -63,11 +63,14 @@ from .contract import (
     SENSOR_PALLET_CAM,
     make_proposal,
 )
+from . import selfmask
 from .pocket import (
     PALLET_FACE_HEIGHT_M,
     PALLET_FACE_WIDTH_M,
     DepthFrame,
     blob_touches_border,
+    corridor_obstruction,
+    face_range_m,
     face_yaw,
     find_pocket_pair,
     fork_path_fraction,
@@ -189,7 +192,25 @@ def word_for_refusals(frame: DepthFrame, trace: dict) -> Optional[str]:
 
 
 def _clipping_explains_it(frame: DepthFrame, item: dict) -> bool:
-    """Was this candidate rejected for reading smaller than it is."""
+    """Was this candidate rejected for reading smaller than it is.
+
+    Two things make a size reading a LOWER bound, and both are about
+    the framing rather than the object:
+
+      * the object ran off the edge of the IMAGE, so what was measured
+        is the visible part of it; and
+      * the object was measured through the DECK CUT, which drops the
+        top of every standing blob by construction. A face height taken
+        after a deck cut is therefore always short of the face, and at
+        close range it is short by most of it - rendered at 0.80 m with
+        the tines in view, a 0.144 m pallet face reads 0.0498 m, one
+        five-hundredth under `PALLET_FACE_HEIGHT_M[0]`. The deck cut
+        removes height and not width, so it excuses the HEIGHT gate and
+        says nothing about the width one.
+
+    Neither excuses a reading that was too BIG, which is the asymmetry
+    the whole rule turns on.
+    """
     gate = SIZE_GATE_LOWER_EDGE.get(item.get("why"))
     if gate is None:
         return False
@@ -198,9 +219,22 @@ def _clipping_explains_it(frame: DepthFrame, item: dict) -> bool:
     if measured is None or measured >= low_edge:
         return False                     # it was too BIG, which clipping
         # cannot cause, or the fit never reported a size at all
+    if key == "height_m" and item.get("deck_cut") is not None:
+        return True
     bbox = item.get("blob")
     return bool(item.get("standing") and bbox is not None
                 and blob_touches_border(frame, bbox))
+
+
+def _pockets_were_masked_away(frame: DepthFrame, seg) -> bool:
+    """Did the fork exclusion take the pocket columns with it."""
+    masked = seg.masked
+    if masked is None or masked.height_known:
+        return False
+    face_d = face_range_m(frame, seg)
+    if face_d is None:
+        return True
+    return face_d <= masked.reach_m + selfmask.REACH_PAD_M
 
 
 def classify(frame: DepthFrame,
@@ -226,7 +260,22 @@ def classify(frame: DepthFrame,
     survives clipping; every word that is a claim about the whole pallet
     does not.
     """
-    if self_mask is not None and self_mask.is_stale(frame.sim_stamp):
+    if self_mask is None:
+        # --- THE FORKS ARE NEVER UNKNOWN ------------------------------
+        # A caller with no `mast_joint` reading still runs on a truck
+        # whose tines are bolted where they are. `selfmask.tine_
+        # footprint` is those two lateral bands out to the tips, at any
+        # height, and it needs no reading, so it is never stale. It can
+        # only delete evidence, never invent it - and the one word it
+        # costs, `pocket_blocked`, is withheld by name below.
+        #
+        # `e3-20260912-190415` is why this is the default and not an
+        # option: unwired, on 87 clean-cycle frames of two docks the
+        # plugin finished with error 0, this classifier read 0.184 and
+        # 15 of its 16 aborts were inside 1.2 m.
+        self_mask = selfmask.tine_footprint()
+
+    if self_mask.is_stale(frame.sim_stamp):
         # A SELF-MASK IN THE WRONG PLACE DELETES PART OF THE PALLET. The
         # mask is placed by `mast_joint`, so a stale joint reading is a
         # mask of unknown position, and at 1.0 m the tine tips are 25 mm
@@ -264,14 +313,32 @@ def classify(frame: DepthFrame,
     if fork_path_fraction(frame, seg, STRINGER_NEAR_M) > STRINGER_NEAR_FRAC:
         return "stringer_in_path"
 
+    # The same word, from the corridor the forks travel rather than
+    # from the pallet's own object. A separate standing component in
+    # front of the face is the staged `m8_stringer`, and it is the one
+    # `EVIDENCE_M8_E3_WORDS.md` open item 1 measured 0/90 on. It is
+    # seen INSIDE the visible region, so - like every other obstruction
+    # word - it survives clipping.
+    if corridor_obstruction(frame, seg, STRINGER_NEAR_M):
+        return "stringer_in_path"
+
+    # A CLAIM ABOUT THE POCKETS NEEDS A FRAME THAT COULD SHOW THEM.
+    # With only a footprint the tine columns were discarded WHOLE, and
+    # the pockets are those columns: once the face is inside the tines'
+    # own reach the forks are in the pallet and the two runs of
+    # pocket-deep pixels went with the mask. Beyond that reach nothing
+    # was deleted in front of the face and the word stands, which keeps
+    # `pocket_blocked` for every pose the fault is staged at.
+    blind_to_pockets = _pockets_were_masked_away(frame, seg)
+
     pair = find_pocket_pair(frame, seg)
     if pair is None:
-        return None if clipped else "pocket_blocked"
+        return None if (clipped or blind_to_pockets) else "pocket_blocked"
     u_mid, v_mid, _span = pair
 
     z = seg.face.depth_at(frame.x_of(u_mid), frame.y_of(v_mid))
     if z is None:
-        return None if clipped else "pocket_blocked"
+        return None if (clipped or blind_to_pockets) else "pocket_blocked"
     if target_lateral_m is None:
         tu = frame.cx if target_u is None else float(target_u)
         lateral = (u_mid - tu) / frame.fx * z

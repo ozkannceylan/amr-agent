@@ -244,6 +244,11 @@ class FaceSegment:
     # the segment so the pocket and fork-path tests mask the same volume
     # the fit did, without the caller having to pass it three times.
     masked: Optional["_SelfVolume"] = None
+    # EVERY standing object this frame had, not only the one the face
+    # came from. `corridor_obstruction` needs the others: a ridge in
+    # the fork path is a separate standing component, and this is the
+    # list `_blob_candidates` already found it in.
+    blobs: Tuple[Tuple[int, int, int, int], ...] = ()
 
     def centre_px(self) -> Tuple[float, float]:
         return (0.5 * (self.u0 + self.u1), 0.5 * (self.v0 + self.v1))
@@ -380,17 +385,15 @@ def _sample(frame: DepthFrame, stride: int) -> List[Tuple[float, float, float]]:
 
 
 # ---------------------------------------------------------- segmentation
-def dominant_plane(frame: DepthFrame) -> Optional[Plane]:
-    """The plane most of the frame lies on. On the plant that is the floor.
+def _trim_to_surface(samples: Sequence[Tuple[float, float, float]],
+                     plane: Optional[Plane]) -> Optional[Plane]:
+    """Walk a fit onto the majority surface of `samples`.
 
-    Trimmed least squares in inverse depth: each pass keeps the points
-    within max(5 cm, the median absolute residual) of the current plane,
-    so the fit walks onto the majority surface instead of averaging the
-    surfaces together the way A1's single unweighted pass did.
+    Each pass keeps the points within max(5 cm, the median absolute
+    residual) of the current plane, so the fit lands on one surface
+    instead of averaging the surfaces together the way A1's single
+    unweighted pass did.
     """
-    coarse, _ = _strides(frame)
-    samples = _sample(frame, coarse)
-    plane = _fit_plane(samples)
     if plane is None:
         return None
     for _ in range(DOMINANT_TRIM_PASSES):
@@ -405,6 +408,90 @@ def dominant_plane(frame: DepthFrame) -> Optional[Plane]:
         plane = refit
         samples = kept
     return plane
+
+
+def dominant_plane(frame: DepthFrame) -> Optional[Plane]:
+    """The FLOOR: the farthest surface, not the biggest one.
+
+    THE BIGGEST SURFACE IS NOT ALWAYS THE FLOOR, and the plant measured
+    exactly where it stops being it. Every height in this module is a
+    residual against this plane, so a plane that is not the floor
+    mismeasures every height in the frame and nothing downstream can
+    tell. `e3-20260918-141014`, static grid, teleported poses, `clean`
+    against `pallet_absent` at the same four poses:
+
+        pose     clean dz/dy   empty bay dz/dy
+        1.00 m      -3.723         -3.797
+        0.90 m      -3.553         -3.790
+        0.80 m      -2.599         -3.789
+        0.70 m      -2.334         -3.783
+
+    With the bay EMPTY the fit reads this rig's floor at -3.8 at every
+    pose. With a pallet in it, from 0.90 m in, the pallet's own deck
+    top - 0.8 m deep, 1.2 m wide, and a growing share of the image as
+    the truck closes - drags the majority fit off the floor and up onto
+    itself: the plane's depth on the optical axis came out 1.942 m
+    against the empty bay's 2.194 m at the 0.80 m pose. `clean` false
+    aborts at that pose were 20 of 20.
+
+    THE FLOOR IS WHAT EVERYTHING ELSE STANDS ON. It is opaque and the
+    world rests on top of it, so along any ray there is nothing behind
+    it: a plane with a surface BEHIND it is not the ground, it is
+    something standing on the ground. So the fit steps back - re-fit on
+    whatever lies deeper than the current plane, and repeat - and what
+    it converges on is the farthest coherent surface in the frame.
+
+    Each step only ever moves AWAY from the camera, the tolerance is
+    the same trim tolerance the majority fit already uses, the
+    population bar is `MIN_PLANE_POINTS` (the solver's own minimum) and
+    the loop is bounded by `DOMINANT_TRIM_PASSES`. No new number.
+    """
+    coarse, _ = _strides(frame)
+    samples = _sample(frame, coarse)
+    plane = _trim_to_surface(samples, _fit_plane(samples))
+    if plane is None:
+        return None
+    # The candidates: the majority surface, then whatever lies behind
+    # it, then whatever lies behind that. `_residuals_m` is measured
+    # depth minus plane depth, so a POSITIVE residual is a point deeper
+    # than the plane claims - a point UNDER the ground, if the plane
+    # were the ground.
+    # THE COMPARISON HAPPENS INSIDE THE DOCK ENVELOPE AND THE FIT DOES
+    # NOT. The fit is in INVERSE depth, so a residual read in metres
+    # grows with range for a fixed error in the quantity actually
+    # fitted: at 6 m the far floor sits "under" its own plane by more
+    # than `OBJECT_CLEARANCE_M` on noise alone, and a test scored over
+    # the whole frame would reject every correct floor. The envelope is
+    # where the dock happens and is already what every other gate here
+    # is measured in; the PLANE still comes from the whole frame,
+    # because a floor is fitted best over as much floor as there is.
+    lo, hi = DOCK_ENVELOPE_M
+    near = [s for s in samples if lo <= s[2] <= hi]
+    chain = [plane]
+    behind = near
+    for _ in range(DOMINANT_TRIM_PASSES):
+        behind = [s for s, r in _residuals_m(behind, chain[-1])
+                  if r > OBJECT_CLEARANCE_M]
+        if len(behind) < MIN_PLANE_POINTS:
+            break
+        stepped = _trim_to_surface(behind, _fit_plane(behind))
+        if stepped is None:
+            break
+        chain.append(stepped)
+    if len(chain) == 1:
+        return plane
+    # WHICH OF THEM IS THE GROUND. The one with the least still under
+    # it. `OBJECT_CLEARANCE_M` is already this module's "nearer than
+    # the dominant plane by this much means it stands on it"; its
+    # mirror is a point the plane says is BELOW the ground, which is
+    # not a thing a floor has. Ties - and a correct floor ties at
+    # nearly zero with any sliver of itself - go to the plane with the
+    # most support, so a good fit is never traded for a far scrap.
+    def under(candidate: Plane) -> int:
+        return sum(1 for _s, r in _residuals_m(near, candidate)
+                   if r > OBJECT_CLEARANCE_M)
+
+    return min(chain, key=lambda c: (under(c), -c.n))
 
 
 def range_window(expected_range: Optional[float] = None
@@ -429,6 +516,32 @@ def range_window(expected_range: Optional[float] = None
         return lo, hi
     return (max(lo, float(expected_range) - TAG_WINDOW_M),
             min(hi, float(expected_range) + TAG_WINDOW_M))
+
+
+def _components(cells) -> List[List[Tuple[int, int]]]:
+    """4-connected components of a set of coarse-grid cells.
+
+    One definition of "a standing object", used by `_blob_candidates`
+    to find them and by `corridor_obstruction` to tell an object in the
+    fork path from depth noise scattered across the floor.
+    """
+    seen = set()
+    comps: List[List[Tuple[int, int]]] = []
+    for start in cells:
+        if start in seen:
+            continue
+        comp = [start]
+        seen.add(start)
+        stack = [start]
+        while stack:
+            i, j = stack.pop()
+            for nb in ((i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)):
+                if nb in cells and nb not in seen:
+                    seen.add(nb)
+                    comp.append(nb)
+                    stack.append(nb)
+        comps.append(comp)
+    return comps
 
 
 def _blob_candidates(frame: DepthFrame, floor: Plane, stride: int,
@@ -475,23 +588,7 @@ def _blob_candidates(frame: DepthFrame, floor: Plane, stride: int,
                 cells[(u // stride, v // stride)] = (u, v)
     if len(cells) < MIN_BLOB_CELLS:
         return []
-    seen = set()
-    comps: List[List[Tuple[int, int]]] = []
-    for start in cells:
-        if start in seen:
-            continue
-        comp = [start]
-        seen.add(start)
-        stack = [start]
-        while stack:
-            i, j = stack.pop()
-            for nb in ((i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)):
-                if nb in cells and nb not in seen:
-                    seen.add(nb)
-                    comp.append(nb)
-                    stack.append(nb)
-        comps.append(comp)
-    comps = [c for c in comps if len(c) >= MIN_BLOB_CELLS]
+    comps = [c for c in _components(cells) if len(c) >= MIN_BLOB_CELLS]
     if not comps:
         return []
     comps.sort(key=len, reverse=True)
@@ -544,6 +641,22 @@ class _SelfVolume(object):
         if floor is not None:
             self.norm = math.sqrt(floor.alpha ** 2 + floor.beta ** 2
                                   + floor.gamma ** 2)
+
+    @property
+    def reach_m(self) -> float:
+        """How far out the masked volume extends, in metres."""
+        return float(getattr(self.mask, "reach_m", 0.0))
+
+    @property
+    def height_known(self) -> bool:
+        """Does this mask know how high the tines are.
+
+        False for `selfmask.tine_footprint`, which takes the tine
+        columns whole because it has no joint reading. A caller that
+        wants to claim something about the POCKETS has to ask: the
+        pockets are those columns.
+        """
+        return bool(getattr(self.mask, "height_known", True))
 
     def covers(self, x: float, y: float, z: float) -> bool:
         if self.floor is None:
@@ -675,6 +788,11 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
             raw.append((x, y, z, u, v, d_h, height))
     if trace is not None:
         trace["in_window"] = len(raw)
+        # Set before any refusal below can return, so a caller reading
+        # the trace of a REFUSED candidate is never reading a key some
+        # other candidate left behind.
+        trace["occluder_points"] = 0
+        trace["share_denominator"] = len(raw)
     if len(raw) < MIN_FACE_POINTS:
         return _refuse(trace, "too_few_points_in_window")
     height_cut = None
@@ -688,6 +806,7 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
     candidates = len(raw)
     if trace is not None:
         trace["after_deck_cut"] = candidates
+        trace["share_denominator"] = candidates
         trace["height_cut"] = height_cut
     counts: Dict[int, int] = {}
     for p in raw:
@@ -695,6 +814,48 @@ def _fit_face(frame: DepthFrame, floor: Optional[Plane],
         counts[key] = counts.get(key, 0) + 1
     mode = min((k for k in counts if counts[k] == max(counts.values())))
     near = (mode + 0.5) * FACE_SEED_BIN_M
+    # --- THE OCCLUDER, AND WHY IT IS NOT PART OF THE FACE ----------------
+    # The share gate asks whether the fitted face is a large share of
+    # WHAT COULD HAVE BEEN THE FACE. A point standing nearer than the
+    # seeded surface was never a candidate for being part of it, so it
+    # cannot be allowed to judge it - and it cannot be allowed to be
+    # trimmed INTO it either, which is the larger of the two effects.
+    #
+    # Measured on the rendered close poses, with the truck's own tines
+    # reaching toward the pallet: at 1.0 m the face holds the seed mode
+    # (109 points in its 0.02 m bin) and the tines spread 635 points as a
+    # ramp across every bin in front of it, so the face reads 25 % of the
+    # blob and the gate refuses `face_is_too_small_a_share`. From 0.90 m
+    # in it is worse: the three trim passes reach into that ramp, the
+    # plane tilts, and the candidate reads
+    # `candidate_falls_away_like_a_floor` - which the word policy takes
+    # as evidence of an empty bay. `e3-20260912-190415` measured the
+    # consequence live: unwired false-abort 0.184, 15 of its 16 aborts
+    # in the close band.
+    #
+    # THE RULE IS THE SEED BAND AND NO NEW NUMBER. "Nearer than the seed
+    # band" is already this function's definition of "not part of the
+    # seeded surface". An occluder INSIDE the band is not reached by it -
+    # `EVIDENCE_M8_E3_WORDS.md` open item 2 is a box 0.06 m in front of a
+    # face with a 0.06 m band, and it stays open.
+    #
+    # THE DISCRIMINATOR IS PHYSICAL. With the bay EMPTY the tines are the
+    # nearest thing in the frame, the seed lands on their near end and
+    # nothing is in front of it at all, so the denominator is untouched
+    # and the empty bay still reads `pallet_absent`. What separates the
+    # two frames is whether anything stands BEHIND the obstruction, and
+    # the frame answers that on its own.
+    ahead = [p for p in raw if p[5] < near - FACE_SEED_BAND_M]
+    if ahead and candidates - len(ahead) >= MIN_FACE_POINTS:
+        raw = [p for p in raw if p[5] >= near - FACE_SEED_BAND_M]
+        candidates = len(raw)
+    else:
+        # Too little would be left to measure. The gates that refused
+        # this candidate before are still the ones that refuse it.
+        ahead = []
+    if trace is not None:
+        trace["occluder_points"] = len(ahead)
+        trace["share_denominator"] = candidates
     seed = [p for p in raw if abs(p[5] - near) <= FACE_SEED_BAND_M]
     # Enough points to DEFINE a plane is not the same bar as enough to
     # TRUST one. The seed is one mode-wide slice of a face that a yaw
@@ -743,6 +904,23 @@ def _world_up(floor: Optional[Plane]) -> Tuple[float, float, float]:
         return (0.0, -1.0, 0.0)
     nx, ny, nz = floor.normal()
     return (-nx, -ny, -nz)
+
+
+def face_range_m(frame: DepthFrame, seg: "FaceSegment") -> Optional[float]:
+    """Horizontal distance from the camera to the centre of the face.
+
+    The same quantity the range window and the fork-path test are
+    measured in - a distance along the FLOOR, not a depth along a ray -
+    so a caller can ask whether the face is nearer than a part of the
+    vehicle without converting anything.
+    """
+    x_c, y_c = frame.x_of(0.5 * (seg.u0 + seg.u1)), frame.y_of(
+        0.5 * (seg.v0 + seg.v1))
+    z_c = seg.face.depth_at(x_c, y_c)
+    if z_c is None or z_c <= 0.0:
+        return None
+    fwd = _horizontal_forward(seg.up)
+    return z_c * (x_c * fwd[0] + y_c * fwd[1] + fwd[2])
 
 
 def face_yaw(face: Plane, up: Tuple[float, float, float]) -> float:
@@ -843,7 +1021,7 @@ def segment(frame: DepthFrame,
     for index, (floor_for_fit, bbox) in enumerate(attempts):
         step: Dict[str, object] = {}
         seg = _try_candidate(frame, floor_for_fit, bbox, fine, window, step,
-                             masked)
+                             masked, tuple(boxes))
         if seg is not None:
             if trace is not None:
                 trace.update(step)
@@ -853,7 +1031,11 @@ def segment(frame: DepthFrame,
         refusals.append({"why": step.get("refused"), "blob": bbox,
                          "standing": floor_for_fit is not None,
                          "width_m": step.get("face_width_m"),
-                         "height_m": step.get("face_height_m")})
+                         "height_m": step.get("face_height_m"),
+                         # The height above the floor the deck was cut
+                         # at, or None. A height measured through a deck
+                         # cut is a LOWER bound - see `m8_core.abort`.
+                         "deck_cut": step.get("height_cut")})
         last = step
     if trace is not None:
         trace.update(last)
@@ -866,7 +1048,8 @@ def _try_candidate(frame: DepthFrame, floor: Optional[Plane],
                    bbox: Tuple[int, int, int, int], fine: int,
                    window: Tuple[float, float],
                    trace: Dict[str, object],
-                   masked: Optional[_SelfVolume] = None
+                   masked: Optional[_SelfVolume] = None,
+                   blobs: Tuple[Tuple[int, int, int, int], ...] = ()
                    ) -> Optional[FaceSegment]:
     """Fit one standing object and put it through every gate."""
     trace["blob"] = bbox
@@ -902,7 +1085,7 @@ def _try_candidate(frame: DepthFrame, floor: Optional[Plane],
                        inliers=n_inliers, width_m=width_m,
                        height_m=height_m, up=up, blob=bbox,
                        height_cut=height_cut, inlier_frac=frac,
-                       window=window, masked=masked)
+                       window=window, masked=masked, blobs=blobs)
 
 
 # ------------------------------------------------------------- the pockets
@@ -1058,6 +1241,110 @@ def fork_path_fraction(frame: DepthFrame, seg: FaceSegment,
     if total == 0:
         return 0.0
     return blocked / float(total)
+
+
+def corridor_obstruction(frame: DepthFrame, seg: FaceSegment,
+                         nearer_by: float,
+                         trace: Optional[Dict[str, object]] = None) -> bool:
+    """Is ANOTHER standing object in the corridor the forks travel.
+
+    `EVIDENCE_M8_E3_WORDS.md` open item 1: `stringer_in_path` recall is
+    0/90 on the staged ridge. `m8_stringer` is 0.08 x 1.00 x 0.06 m on
+    the floor 0.60 m in FRONT of the pallet, so it is a separate
+    standing component from the pallet, and `fork_path_fraction`
+    searches the pallet's own object. It was never going to see it.
+
+    IT ASKS THE QUESTION OF THE OBJECTS THIS FRAME ALREADY FOUND.
+    `_blob_candidates` is what decides that something stands on the
+    floor, using a depth STEP along the ray, and `segment` has already
+    run it - `seg.blobs` is its answer and `seg.blob` is the one the
+    face came from. This function only asks where the OTHERS are. It
+    invents no standing test of its own, which is the whole of why it
+    is trustworthy on the plant.
+
+    THAT WAS MEASURED, AND THE FIRST VERSION OF THIS FUNCTION FAILED IT.
+    Session `e3-20260918-122007` ran a version that scanned pixels
+    directly and read height above the floor plane instead of a depth
+    step. Offline it was clean - 0 to 4 scattered cells on a rendered
+    clean frame across five seeds - and on the plant's STATIC grid it
+    was clean too, 1 to 4 cells on `clean` against 131 to 147 on the
+    staged ridge. On a LIVE dock it read 6 to 73 cells on clean frames
+    and grew steadily as the truck braked into the pallet, which is a
+    floor plane that no longer fits a floor the camera is pitching
+    over, not an obstruction. It cost 13 false aborts of 74 countable
+    frames. The blob candidates over the same two cycles stayed at 2 to
+    6 per frame, the same as the static clean captures: the depth step
+    did not move. So the step is the test, and this function uses the
+    module's own.
+
+    NOT EVERY POSE CAN SEE IT. At the 1.0 m pose the staged ridge is
+    0.40 m from a camera 1.10 m up and pitched 0.5236 rad down: the ray
+    to it is 69 deg below horizontal and the frame stops at 65. The
+    ridge is under the field of view and no search finds it. That is
+    geometry, not a gate, and it bounds the recall this test can reach
+    to the two poses that can see it.
+
+    IT REQUIRES FORK KNOWLEDGE. The truck's own tines travel in this
+    corridor by definition, so a search that cannot tell them from the
+    scene aborts every clean dock - which is why `EVIDENCE_M8_C1C2_FIX`
+    miss 2 refused to widen the search without a self-mask. With no
+    mask bound this returns False and claims nothing.
+    """
+    if seg.floor is None or seg.masked is None or not seg.blobs:
+        return False
+    face_d = face_range_m(frame, seg)
+    if face_d is None:
+        return False
+    stride, _fine = _strides(frame)
+    fwd = _horizontal_forward(seg.up)
+    floor_norm = math.sqrt(seg.floor.alpha ** 2 + seg.floor.beta ** 2
+                           + seg.floor.gamma ** 2)
+    lo, hi = FORK_BAND_M
+    if seg.height_cut is not None:
+        hi = min(hi, seg.height_cut)
+    z_face = seg.face.depth_at(frame.x_of(0.5 * (seg.u0 + seg.u1)),
+                               frame.y_of(0.5 * (seg.v0 + seg.v1)))
+    centre_lat = None
+    if z_face is not None:
+        centre_lat = frame.x_of(0.5 * (seg.u0 + seg.u1)) * z_face
+    half_width = 0.5 * seg.width_m
+    biggest = 0
+    for bbox in seg.blobs:
+        if bbox == seg.blob:
+            continue          # the pallet is not in its own fork path
+        u0, u1, v0, v1 = bbox
+        cells = 0
+        for v in range(v0, v1, stride):
+            y = frame.y_of(v)
+            for u in range(u0, u1, stride):
+                z = frame.at(u, v)
+                if z is None:
+                    continue
+                x = frame.x_of(u)
+                d_h = z * (x * fwd[0] + y * fwd[1] + fwd[2])
+                if d_h < 0.0 or d_h >= face_d - nearer_by:
+                    continue  # at or behind the face: not the path
+                if (centre_lat is not None
+                        and abs(x * z - centre_lat) > half_width):
+                    continue  # outside the width a fork has to clear
+                pz = seg.floor.depth_at(x, y)
+                if pz is None or pz - z <= OBJECT_CLEARANCE_M:
+                    continue  # `_blob_candidates`' own standing test
+                if seg.masked.covers(x, y, z):
+                    continue  # a fork in the fork path is a fork
+                r = _perp_residual(seg.floor, x, y, z, floor_norm)
+                if r is None:
+                    continue
+                height = -r
+                if height < lo or height > hi:
+                    continue
+                cells += 1
+        biggest = max(biggest, cells)
+    if trace is not None:
+        trace["corridor_component"] = biggest
+        trace["corridor_blobs"] = len(seg.blobs)
+        trace["corridor_face_d_m"] = face_d
+    return biggest >= MIN_BLOB_CELLS
 
 
 def fit_face_plane(frame: DepthFrame,

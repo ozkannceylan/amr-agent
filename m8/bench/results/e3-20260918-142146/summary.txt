@@ -1,0 +1,49 @@
+E3 abort classifier vs staged faults - session e3-20260918-142146
+labels: {'traction': 'nominal', 'arm': 'wheel+imu', 'loc': 'amcl@735cdbc6', 'nav': 'on@7f57e6cf', 'dock': 'on@1676eac0', 'docking': 'on@a462315f', 'monitor': 'off', 'partition': 'm5v3', 'log_dir': '/mnt/c/Users/ozkan/projects/amr-agent-m5v3/m5_ver3/logs/run-20260918-140844'}
+frames per condition: 20  ranges: 1.0,0.9,0.8,0.7  cycles: 0
+fault set: {'rotated_rad': 0.35, 'shifted_m': 0.3, 'block_ahead_m': 0.06, 'block_z_m': 0.06, 'stringer_ahead_m': 0.6, 'stringer_z_m': 0.03, 'absent_xy': (-17.0, 10.0), 'boxes': {'pocket_blocked': 'm8_pocket_block.sdf', 'stringer_in_path': 'm8_stringer.sdf'}}
+
+abort rate (any reason) = aborts/frames; [exact] = reason names the staged fault
+condition             approach_1.00m    approach_0.90m    approach_0.80m    approach_0.70m     overall
+clean                     0/20 [  0]        0/20 [  0]        0/20 [  0]        0/20 [  0]        0/80
+pallet_absent            20/20 [ 20]       20/20 [ 20]       20/20 [ 20]       20/20 [ 20]       80/80
+pallet_rotated           20/20 [ 20]       20/20 [ 20]       20/20 [ 20]       20/20 [ 20]       80/80
+pallet_shifted            0/20 [  0]        0/20 [  0]        0/20 [  0]        0/20 [  0]        0/80
+pocket_blocked           20/20 [  0]       20/20 [  0]       20/20 [  0]       20/20 [  0]       80/80
+stringer_in_path          0/20 [  0]        0/20 [  0]        0/20 [  0]        0/20 [  0]        0/80
+
+camera range per pose: approach_1.00m 1.000 m, approach_0.90m 0.899 m, approach_0.80m 0.799 m, approach_0.70m 0.700 m
+
+confusion (rows: staged condition; cols: classifier word)
+                               none    pallet_absent   pallet_rotated   pallet_shifted   pocket_blocked stringer_in_path
+clean                            80                0                0                0                0                0
+pallet_absent                     0               80                0                0                0                0
+pallet_rotated                    0                0               80                0                0                0
+pallet_shifted                   80                0                0                0                0                0
+pocket_blocked                    0               60                0                0                0               20
+stringer_in_path                 80                0                0                0                0                0
+
+named C1 refusals behind the static words: {'(segmented)': 340, 'face_width_not_pallet_sized': 140}
+clean static frames by range band: {'close': '0/80'}
+
+clean live cycles (dock_bench.py record --from-staging):
+  overall classified 0 aborts 0 false-abort 
+  refusals behind those words: {}
+
+live frames by range band (all cycles):
+
+INTERIM BAR POPULATION - num_retries == 0, joined from the dock session's feedback.csv, on a frame whose pallet was read back and was within 0.02 m of where the cycle started, AT THAT FRAME
+  classified 0 aborts 0 false-abort 
+  reasons {}
+  refusals {}
+  by band {}
+  excluded and reported separately: on a retry 0, retry count unjoined 0, pallet moved or unread 0
+
+AS WIRED - same frames, classified twice: baseline, then fork self-mask + tag-derived target as the nodes run it
+  static frames            paired 480 (stale 24, absent 0) | aborts 240 -> 364 | segmented gained 0 lost 22
+                           words that moved: {'none -> pocket_blocked': 114, 'none -> stringer_in_path': 22, 'pallet_rotated -> pallet_absent': 19, 'pallet_absent -> none': 7, 'pallet_rotated -> none': 4, 'stringer_in_path -> none': 1}
+                           by band: {'close': '240->364 of 480'}
+  all live frames          paired 0 (stale 0, absent 0) | aborts 0 -> 0 | segmented gained 0 lost 0
+  interim bar population   paired 0 (stale 0, absent 0) | aborts 0 -> 0 | segmented gained 0 lost 0
+
+classify latency s: median 0.087 max 0.116 n 480

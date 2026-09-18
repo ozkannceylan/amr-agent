@@ -116,9 +116,19 @@ def test_no_mask_is_not_a_stale_mask():
 
 # --------------------------------------------- what the mask buys, measured
 def test_the_mask_gives_c1_back_the_last_metre():
-    """Open item 1, offline: refused at 1.0 m, observed with the mask."""
+    """Open item 1, offline: no pose at 1.0 m, observed with the mask.
+
+    This test used to read `segment(frame) is None`. The occluder-aware
+    share (step 3) changed that: the tines stand IN FRONT of the face,
+    they leave the share denominator, and the face is now segmented
+    without any mask at all - clipped, because the blob it came from
+    still runs off the bottom of the image. What no amount of
+    segmentation gives back is the POCKET PAIR, because the tines are
+    inside the pockets and that is what a fork is for. `observe` is
+    still None without fork knowledge, and that is what the mask buys.
+    """
     frame, scene = scenes.forks(scenes.CLOSE_M)
-    assert segment(frame) is None
+    assert observe(frame) is None
     seg = segment(frame, self_mask=_fresh())
     assert seg is not None
 

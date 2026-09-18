@@ -43,3 +43,15 @@
 # posegraph rule beside it gives: the two files are one artifact and a
 # rule that covers one of them is a rule that covers neither.
 *.data -text
+
+# A HASH-BOUND ARTIFACT IS NOT TEXT TO BE TIDIED. The occupancy grid and
+# the transform fitted to it are bound by md5: registration.yaml carries
+# `map_md5` and `map_yaml_md5`, and `map_register.load_registration`
+# refuses a transform whose grid has changed underneath it. Commit
+# 9c52aa6 ran end-of-file-fixer across the tree and added the missing
+# final newline to warehouse_v3.yaml - 136 bytes to 137 - which changed
+# its md5 from a3c76218 to 1a35bb79 and made `m5v3.sh start` REFUSE at
+# "the map on disk is the map the registration was fitted to". Pure
+# formatting is not pure when the bytes are the artifact. Marking these
+# binary stops Git normalising them and stops a text hook seeing them.
+m5_ver3/maps/** -text

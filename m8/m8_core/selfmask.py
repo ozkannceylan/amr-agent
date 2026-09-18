@@ -114,9 +114,16 @@ class SelfMask:
     reach_m: float = TINE_REACH_M
     top_m: float = TINE_TOP_M
     stale_s: float = STALE_S
+    # Is the TOP of this mask a reading, or is there no reading at all.
+    # See `tine_footprint` below. Everything else here - the two lateral
+    # bands and the reach - is bolted to the vehicle and is the same
+    # whatever the mast is doing; only the height rides `mast_joint`.
+    height_known: bool = True
 
     @property
     def top_above_floor_m(self) -> float:
+        if not self.height_known:
+            return float("inf")
         return self.top_m + self.lift_m
 
     def is_stale(self, now: Optional[float]) -> bool:
@@ -129,6 +136,11 @@ class SelfMask:
         than the window are not one clock, and guessing which is right is
         how a mask ends up in the wrong place silently.
         """
+        if not self.height_known:
+            # There is no joint reading in this mask to go stale. A
+            # footprint is where it is because the tines are bolted
+            # there, and a dead `mast_joint` publisher does not move it.
+            return False
         if self.stamp is None or now is None:
             return True
         return abs(float(now) - float(self.stamp)) > self.stale_s
@@ -150,6 +162,36 @@ class SelfMask:
             if lo - LATERAL_PAD_M <= lateral <= hi + LATERAL_PAD_M:
                 return True
         return False
+
+
+def tine_footprint(tines: Sequence[Tuple[float, float]] = TINE_LATERAL_M
+                   ) -> SelfMask:
+    """The tine COLUMNS: lateral and reach, with no height at all.
+
+    WHAT IT IS FOR. `from_mast_joint` needs a live `mast_joint` reading
+    and is stale without one, and `m8_core.abort` answers a stale mask
+    with silence. That leaves the classifier with NO knowledge of its
+    own forks whenever the joint channel is not wired - and
+    `e3-20260912-190415` measured what that costs: live false-abort
+    0.184 with no mask against 0.011 with one, 15 of the 16 aborts in
+    the band the forks own.
+
+    But the forks are not unknown without the joint. Two of their three
+    dimensions are bolted to the vehicle: `TINE_LATERAL_M` is where the
+    tines are across the truck and `TINE_REACH_M` is how far they stick
+    out, and neither moves when the mast does. Only the TOP moves. So
+    the fallback is the full COLUMN - those two lateral bands, out to
+    the tips, at any height at all.
+
+    IT IS STRICTLY WORSE THAN THE REAL MASK AND IT SAYS SO. A joint-
+    derived mask cuts a 0.15 m slice and leaves the rest of the pocket
+    mouth visible; this one takes the column whole, pockets included. It
+    can therefore only ever DELETE evidence, never invent it - which is
+    the safe direction for a segmentation input - but a frame masked
+    this way cannot support a word about the POCKETS, and
+    `m8_core.abort` is where that consequence is enforced.
+    """
+    return SelfMask(stamp=None, tines=tuple(tines), height_known=False)
 
 
 def from_mast_joint(position_m: float, stamp: Optional[float] = None,

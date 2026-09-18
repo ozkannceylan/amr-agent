@@ -38,6 +38,13 @@ Each case is classified THREE times on the SAME depth buffer: with no
 self-mask, with a fresh one, and with a stale one. Three words on one
 frame is the only way to attribute a difference to the mask.
 
+WHAT "NO SELF-MASK" MEANS NOW. `m8_core.abort.classify` falls back to
+`selfmask.tine_footprint` when the caller has no `mast_joint` reading -
+the tine COLUMNS, which are bolted to the truck and need no reading. So
+the `reason` column is the classifier with no joint state and no tag,
+which is what `e3_abort.py` calls unwired; it is not a classifier that
+has never heard of a fork.
+
 `proceed` is not a word here and is not an output of anything.
 Every run writes a new session folder. It never edits an old one.
 """
@@ -63,6 +70,10 @@ from m8_core.scene import make_scene_depth                     # noqa: E402
 
 W, H = 320, 240
 STAGING_M, APPROACH_M, CLOSE_M = 2.245, 1.5, 1.0
+# The live cycles of `e3-20260912-190415` ran to 0.711 m, closer than any
+# pose the static grid holds, and 15 of the 16 unwired aborts on them
+# were inside 1.2 m. These are that band, rendered.
+INSIDE_M = (0.9, 0.8, 0.711)
 STAMP = 1.0
 
 # The tines, off `m8_core.selfmask`, which took them off model.sdf. The
@@ -86,15 +97,27 @@ CASES = (
      {"slabs": TINES, "pallet": False}, ""),
     ("forks_empty", CLOSE_M, "pallet_absent",
      {"slabs": TINES, "pallet": False}, ""),
+) + tuple(
+    ("forks", d, None, {"slabs": TINES},
+     "the close band the live cycles actually ran in")
+    for d in INSIDE_M
+) + tuple(
+    ("forks_empty", d, "pallet_absent", {"slabs": TINES, "pallet": False},
+     "silence must not be bought with the empty bay")
+    for d in INSIDE_M
+) + (
     ("empty_bay", APPROACH_M, "pallet_absent", {"pallet": False}, ""),
     ("blocked_by_box", STAGING_M, "pocket_blocked", {"box": True},
      "open 3: wrong word 84 of 90 on the plant"),
     ("blocked_by_box", APPROACH_M, "pocket_blocked", {"box": True},
      "open 3"),
     ("blocked_by_box", CLOSE_M, "pocket_blocked", {"box": True}, "open 3"),
+    ("ridge", STAGING_M, "stringer_in_path", {"ridge": True},
+     "open 1: a separate component, never entered until now"),
     ("ridge", APPROACH_M, "stringer_in_path", {"ridge": True},
-     "open 4: a separate component, never entered"),
-    ("ridge", CLOSE_M, "stringer_in_path", {"ridge": True}, "open 4"),
+     "open 1: the RENDERER resolves one blob here, the plant six"),
+    ("ridge", CLOSE_M, "stringer_in_path", {"ridge": True},
+     "open 1: at this pose the ridge is UNDER the field of view"),
     ("clipped", APPROACH_M, None, {"lateral": 1.45}, "runs off the image"),
     ("clipped", CLOSE_M, None, {"lateral": 0.95}, "runs off the image"),
     ("rotated_pos", APPROACH_M, "pallet_rotated", {"yaw": 0.25}, ""),

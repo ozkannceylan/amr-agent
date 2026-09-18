@@ -128,6 +128,33 @@ WIRED_FIELDS = (
     "seg_width_wired_m", "seg_yaw_wired_rad", "t_classify_wired_s",
 )
 
+# --- what the LAST run could not say, and this one can --------------------
+# `e3-20260912-190415` recorded 13 of 16 unwired aborts refusing
+# `face_width_not_pallet_sized` and could not say whether the candidate
+# read too WIDE or too NARROW - `seg_width_m` is only written when a
+# frame segments, so a refused candidate carried no size at all. That is
+# the difference between "measured and not a pallet" and "clipped", and
+# the word policy turns on it. These columns are that join, plus the two
+# counts the occluder-aware share and the fork corridor are decided on.
+INSTRUMENT_FIELDS = (
+    "fork_knowledge", "refused_width_m", "refused_height_m",
+    "refused_deck_cut_m", "occluder_points", "share_denominator",
+    "corridor_cells", "corridor_component",
+    # --- WHAT THE FRAME THOUGHT THE FLOOR WAS ------------------------
+    # `segment` has always traced these three and no bench has ever
+    # written them down. Every height in `m8_core` is measured against
+    # the dominant plane, so a frame that fitted the wrong plane
+    # mismeasures every height it reports and nothing downstream can
+    # tell. On this rig the floor's dz/dy is about -3.8 and a standing
+    # face reads +0.7...+1.5 (`pocket.FACE_MIN_DZ_DY`), so the sign and
+    # size of this column say WHICH surface the frame called the floor.
+    "floor_dz_dy", "floor_depth_on_axis_m", "floor_points",
+    # The refused candidate's own blob, so "is it clipped" and "how big
+    # is it" stop being inferences.
+    "refused_blob_u0", "refused_blob_u1",
+    "refused_blob_v0", "refused_blob_v1",
+)
+
 STATIC_FIELDS = (
     "pose", "regime", "condition", "k", "stamp", "reason", "abort", "exact",
     "cam_range_m", "tru_lat_m", "tru_range_m", "face_u0", "face_u1",
@@ -135,7 +162,7 @@ STATIC_FIELDS = (
     "seg_ok", "refused", "candidates", "in_window", "inlier_frac",
     "roi_u0", "roi_u1", "roi_v0", "roi_v1", "seg_width_m",
     "seg_height_m", "seg_yaw_rad", "t_decode_s", "t_classify_s",
-) + WIRED_FIELDS
+) + INSTRUMENT_FIELDS + WIRED_FIELDS
 CYCLE_FIELDS = (
     "cycle", "k", "stamp", "wall", "regime", "reason", "abort",
     "truth_x", "truth_y", "truth_yaw", "cam_range_m", "valid_frac",
@@ -144,7 +171,7 @@ CYCLE_FIELDS = (
     "seg_height_m", "seg_yaw_rad",
     "num_retries", "dock_state", "retry_joined",
     "pallet_readback_ok", "pallet_moved_m", "countable", "t_classify_s",
-) + WIRED_FIELDS
+) + INSTRUMENT_FIELDS + WIRED_FIELDS
 
 
 def _not_run(why=""):
@@ -223,8 +250,9 @@ def classify_frame(frame, self_mask=None, also_wired=False):
     comparison needs the pair.
     """
     from bench import plant as P
-    from m8_core.abort import classify
-    from m8_core.pocket import face_yaw, segment
+    from m8_core import selfmask as SM
+    from m8_core.abort import STRINGER_NEAR_M, classify
+    from m8_core.pocket import corridor_obstruction, face_yaw, segment
     t0 = time.perf_counter()
     depths = P.decode(frame)
     df = P.depth_frame(frame, depths)
@@ -232,7 +260,13 @@ def classify_frame(frame, self_mask=None, also_wired=False):
     reason = classify(df, self_mask=self_mask)
     t2 = time.perf_counter()
     trace = {}
-    seg = segment(df, trace=trace, self_mask=self_mask)
+    # THE TRACE MUST BE TAKEN THE WAY THE WORD WAS. `classify` falls
+    # back to `selfmask.tine_footprint` when the caller has no joint
+    # reading, so a trace segmented with no mask at all would be a trace
+    # of a different classification - the columns would explain a word
+    # nothing said.
+    trace_mask = SM.tine_footprint() if self_mask is None else self_mask
+    seg = segment(df, trace=trace, self_mask=trace_mask)
     valid = sum(1 for z in depths if math.isfinite(z) and z > 0.0)
     out = {
         "reason": reason or "none",
@@ -246,11 +280,31 @@ def classify_frame(frame, self_mask=None, also_wired=False):
         "candidates": trace.get("candidates"),
         "in_window": trace.get("in_window"),
         "inlier_frac": trace.get("inlier_frac"),
+        "fork_knowledge": ("footprint" if self_mask is None
+                           else ("joint" if trace_mask.height_known
+                                 else "footprint")),
+        "occluder_points": trace.get("occluder_points"),
+        "share_denominator": trace.get("share_denominator"),
     }
+    out["floor_dz_dy"] = trace.get("floor_dz_dy")
+    out["floor_depth_on_axis_m"] = trace.get("floor_depth_on_axis_m")
+    out["floor_points"] = trace.get("floor_points")
+    last = (trace.get("refusals") or [{}])[-1]
+    out["refused_width_m"] = last.get("width_m")
+    out["refused_height_m"] = last.get("height_m")
+    out["refused_deck_cut_m"] = last.get("deck_cut")
+    blob = last.get("blob")
+    if blob:
+        (out["refused_blob_u0"], out["refused_blob_u1"],
+         out["refused_blob_v0"], out["refused_blob_v1"]) = blob
     if seg is not None:
+        ctrace = {}
+        corridor_obstruction(df, seg, STRINGER_NEAR_M, ctrace)
         out.update(roi_u0=seg.u0, roi_u1=seg.u1, roi_v0=seg.v0, roi_v1=seg.v1,
                    seg_width_m=seg.width_m, seg_height_m=seg.height_m,
-                   seg_yaw_rad=face_yaw(seg.face, seg.up))
+                   seg_yaw_rad=face_yaw(seg.face, seg.up),
+                   corridor_cells=ctrace.get("corridor_blobs"),
+                   corridor_component=ctrace.get("corridor_component"))
     if also_wired:
         from m8_nodes.tag_target import kwargs_for
         mask = mask_for(frame)
