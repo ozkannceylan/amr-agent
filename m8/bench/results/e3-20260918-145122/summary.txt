@@ -1,0 +1,69 @@
+E3 abort classifier vs staged faults - session e3-20260918-145122
+labels: {'traction': 'nominal', 'arm': 'wheel+imu', 'loc': 'amcl@735cdbc6', 'nav': 'on@7f57e6cf', 'dock': 'on@1676eac0', 'docking': 'on@a462315f', 'monitor': 'off', 'partition': 'm5v3', 'log_dir': '/mnt/c/Users/ozkan/projects/amr-agent-m5v3/m5_ver3/logs/run-20260918-144513'}
+frames per condition: 30  ranges:   cycles: 4
+fault set: {'rotated_rad': 0.35, 'shifted_m': 0.3, 'block_ahead_m': 0.06, 'block_z_m': 0.06, 'stringer_ahead_m': 0.6, 'stringer_z_m': 0.03, 'absent_xy': (-17.0, 10.0), 'boxes': {'pocket_blocked': 'm8_pocket_block.sdf', 'stringer_in_path': 'm8_stringer.sdf'}}
+
+abort rate (any reason) = aborts/frames; [exact] = reason names the staged fault
+condition              overall
+clean                      0/0
+pallet_absent              0/0
+pallet_rotated             0/0
+pallet_shifted             0/0
+pocket_blocked             0/0
+stringer_in_path           0/0
+
+camera range per pose: 
+
+confusion (rows: staged condition; cols: classifier word)
+                               none    pallet_absent   pallet_rotated   pallet_shifted   pocket_blocked stringer_in_path
+clean                             0                0                0                0                0                0
+pallet_absent                     0                0                0                0                0                0
+pallet_rotated                    0                0                0                0                0                0
+pallet_shifted                    0                0                0                0                0                0
+pocket_blocked                    0                0                0                0                0                0
+stringer_in_path                  0                0                0                0                0                0
+
+named C1 refusals behind the static words: {}
+clean static frames by range band: {}
+
+clean live cycles (dock_bench.py record --from-staging):
+  cycle 0 plugin success=True error=0 retries=0 truth= m | classified 48 aborts 15 false-abort 0.312 | reasons {'none': 33, 'pallet_absent': 14, 'stringer_in_path': 1}
+           pallet readback_ok=0 moved= m clean_cycle=False | retries joined 40/48 from 195 feedback rows
+           countable 0 aborts 0 false-abort 
+  cycle 1 plugin success=True error=0 retries=0 truth= m | classified 75 aborts 32 false-abort 0.427 | reasons {'none': 43, 'pallet_absent': 28, 'pallet_rotated': 4}
+           pallet readback_ok=1 moved=0.4085 m clean_cycle=False | retries joined 62/75 from 314 feedback rows
+           countable 35 aborts 8 false-abort 0.229
+  cycle 2 plugin success=False error=904 retries=0 truth= m | classified 315 aborts 225 false-abort 0.714 | reasons {'pallet_rotated': 104, 'pallet_absent': 102, 'none': 90, 'pocket_blocked': 18, 'stringer_in_path': 1}
+           pallet readback_ok=1 moved=0.1675 m clean_cycle=False | retries joined 304/315 from 1388 feedback rows
+           countable 45 aborts 19 false-abort 0.422
+  cycle 3 plugin success=True error=0 retries=0 truth= m | classified 67 aborts 30 false-abort 0.448 | reasons {'none': 37, 'pallet_absent': 25, 'pallet_rotated': 4, 'stringer_in_path': 1}
+           pallet readback_ok=1 moved=0.3759 m clean_cycle=False | retries joined 56/67 from 292 feedback rows
+           countable 33 aborts 9 false-abort 0.273
+  overall classified 505 aborts 302 false-abort 0.598
+  refusals behind those words: {'(segmented)': 329, 'face_width_not_pallet_sized': 104, 'candidate_falls_away_like_a_floor': 61, 'too_few_points_in_window': 11}
+
+live frames by range band (all cycles):
+  staging      97/185  = 0.524  reasons {'none': 88, 'pallet_absent': 74, 'pallet_rotated': 23}
+             refusals {'(segmented)': 108, 'face_width_not_pallet_sized': 65, 'candidate_falls_away_like_a_floor': 11, 'too_few_points_in_window': 1}
+  approach     10/72   = 0.139  reasons {'none': 62, 'pallet_rotated': 8, 'stringer_in_path': 2}
+             refusals {'(segmented)': 72}
+  close       195/248  = 0.786  reasons {'pallet_absent': 95, 'pallet_rotated': 81, 'none': 53, 'pocket_blocked': 18, 'stringer_in_path': 1}
+             refusals {'(segmented)': 149, 'candidate_falls_away_like_a_floor': 50, 'face_width_not_pallet_sized': 39, 'too_few_points_in_window': 10}
+
+INTERIM BAR POPULATION - num_retries == 0, joined from the dock session's feedback.csv, on a frame whose pallet was read back and was within 0.02 m of where the cycle started, AT THAT FRAME
+  classified 113 aborts 36 false-abort 0.319
+  reasons {'none': 77, 'pallet_absent': 35, 'stringer_in_path': 1}
+  refusals {'(segmented)': 74, 'face_width_not_pallet_sized': 20, 'candidate_falls_away_like_a_floor': 14, 'too_few_points_in_window': 5}
+  by band {'staging': '0/31', 'approach': '1/43', 'close': '35/39'}
+  excluded and reported separately: on a retry 105, retry count unjoined 43, pallet moved or unread 207
+
+AS WIRED - same frames, classified twice: baseline, then fork self-mask + tag-derived target as the nodes run it
+  static frames            paired 0 (stale 0, absent 0) | aborts 0 -> 0 | segmented gained 0 lost 0
+  all live frames          paired 505 (stale 251, absent 0) | aborts 302 -> 133 | segmented gained 43 lost 0
+                           words that moved: {'pallet_absent -> none': 107, 'pallet_rotated -> none': 53, 'pocket_blocked -> none': 7, 'pallet_absent -> pocket_blocked': 4, 'pallet_absent -> pallet_rotated': 4, 'stringer_in_path -> none': 3, 'none -> pocket_blocked': 1}
+                           by band: {'staging': '97->44 of 185', 'approach': '10->5 of 72', 'close': '195->84 of 248'}
+  interim bar population   paired 113 (stale 56, absent 0) | aborts 36 -> 14 | segmented gained 21 lost 0
+                           words that moved: {'pallet_absent -> none': 22, 'pallet_absent -> pocket_blocked': 2, 'none -> pocket_blocked': 1, 'stringer_in_path -> none': 1}
+                           by band: {'staging': '0->0 of 31', 'approach': '1->0 of 43', 'close': '35->14 of 39'}
+
+classify latency s: median 0.073 max 0.102 n 505
