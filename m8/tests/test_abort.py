@@ -17,6 +17,7 @@ from m8_core.contract import ABORT_REASONS, KIND_DOCK_ABORT
 from m8_core.pocket import (
     DepthFrame,
     blob_touches_border,
+    corridor_obstruction,
     fork_path_fraction,
     make_plane_depth,
     segment,
@@ -154,15 +155,25 @@ def test_the_trucks_own_forks_are_not_an_empty_bay():
     """The 0.884 false-abort, reproduced offline and then removed.
 
     At 1.0 m the tines and the pallet are one standing object with no
-    range discontinuity at the junction, so `segment` refuses with
+    range discontinuity at the junction. The word policy answered that
+    with silence, because `segment` refused with
     `face_is_too_small_a_share` - a refusal that says the face IS there,
-    holding 23-25 % of the blob. Answering it with `pallet_absent` says
-    the opposite of what the refusal found.
+    holding 23-25 % of the blob - and answering it with `pallet_absent`
+    says the opposite of what the refusal found.
+
+    STEP 3 CHANGED THE REFUSAL AND NOT THE WORD. The tines are nearer
+    than the seeded face, so they are an occluder: they leave the share
+    denominator, the face holds 95 % of what is left and it is
+    segmented. The frame is still not an empty bay and the word is
+    still none - now because the bay was measured and found full, which
+    is a better reason for the same silence.
     """
     frame, _scene = scenes.forks(scenes.CLOSE_M)
     trace = {}
-    assert segment(frame, trace=trace) is None
-    assert trace["refusals"][0]["why"] == "face_is_too_small_a_share"
+    seg = segment(frame, trace=trace)
+    assert seg is not None
+    assert trace["occluder_points"] > 0
+    assert trace["inlier_frac"] > 0.9
     assert classify(frame) is None
 
 
@@ -306,3 +317,106 @@ def test_the_floor_fallback_is_not_a_clipped_object():
     assert segment(frame, trace=trace) is None
     assert trace["refusals"][-1]["standing"] is False
     assert classify(frame) == "pallet_absent"
+
+
+# ----------------------------------- step 3: the word inside one metre
+#
+# `e3-20260912-190415` measured the LIVE false-abort of the classifier
+# with no mask and no tag at 0.184 on 87 clean-cycle frames, and 15 of
+# its 16 aborts were in the close band (< 1.2 m). The close band is the
+# band the truck's own forks own. The wired classifier read 0.011 on the
+# same buffers, so the frames were not the problem and the words were.
+#
+# Rendered at the ranges that band actually covers - the live cycles ran
+# to 0.711 m, closer than any static pose the grid holds - the unmasked
+# classifier says `pallet_absent` from 0.90 m in, by way of
+# `candidate_falls_away_like_a_floor`: the three trim passes reach into
+# the tine ramp standing in front of the face and the plane tilts until
+# it reads like a floor. Step 3 takes the occluder out of the fit and
+# out of the share denominator, and the face is found on its own.
+@pytest.mark.parametrize("distance", [1.0, 0.9, 0.8, 0.711])
+def test_the_forks_are_not_an_empty_bay_inside_one_metre(distance):
+    """The bay is full at every one of these ranges and stays full."""
+    frame, _scene = scenes.forks(distance)
+    assert classify(frame) is None
+
+
+@pytest.mark.parametrize("distance", [1.0, 0.9, 0.8, 0.711])
+def test_an_empty_bay_is_still_absent_inside_one_metre(distance):
+    """Silence must not be bought with the empty bay, at any range.
+
+    With no pallet the tines are the nearest thing in the frame, nothing
+    stands in front of the seed, and the denominator the share gate uses
+    is the one it always used.
+    """
+    frame, _scene = scenes.forks_empty_bay(distance)
+    assert classify(frame) == "pallet_absent"
+
+
+# ---------------------------------- step 4: the fork corridor, mask-gated
+#
+# `EVIDENCE_M8_E3_WORDS.md` open item 1: `stringer_in_path` recall is
+# 0/90 on the staged ridge. `m8_stringer` is a SEPARATE component 0.60 m
+# in front of the pallet, and `fork_path_fraction` searched the pallet's
+# own standing object, which the ridge is not part of. Widening the
+# search to the corridor a fork travels through was blocked by the
+# tines: they travel in that corridor by definition, so an unmasked
+# widening aborts every clean dock. The self-mask removed the blocker.
+#
+# THE CORRIDOR THEREFORE REQUIRES A MASK. A classifier that cannot tell
+# its own forks from the scene has no word worth publishing about what
+# is in front of them, and the same rule already governs a stale mask in
+# `classify`. Unwired, the search is the one it always was.
+def _fresh_mask(frame):
+    from m8_core import selfmask
+    return selfmask.from_mast_joint(0.0, stamp=frame.sim_stamp)
+
+
+@pytest.mark.parametrize("distance", [scenes.APPROACH_M, scenes.STAGING_M])
+def test_a_ridge_in_the_fork_corridor_is_stringer_in_path(distance):
+    """Open item 1, closed offline. The plant is still the score."""
+    frame, _scene = scenes.ridge(distance)
+    assert classify(frame, self_mask=_fresh_mask(frame)) == "stringer_in_path"
+
+
+@pytest.mark.parametrize("distance", [scenes.APPROACH_M, scenes.STAGING_M])
+def test_the_corridor_claims_nothing_without_fork_knowledge(distance):
+    """No fork knowledge, no corridor - the guard, tested where it lives.
+
+    `classify` always has fork knowledge now (`selfmask.tine_footprint`
+    is its default), so the guard cannot be reached through it. It is
+    still the rule the corridor rests on and a caller of `pocket`
+    directly - `fit_face_plane`, the benches - gets it.
+    """
+    frame, _scene = scenes.ridge(distance)
+    seg = segment(frame)
+    assert seg is not None
+    assert seg.masked is None
+    assert corridor_obstruction(frame, seg, STRINGER_NEAR_M) is False
+
+
+@pytest.mark.parametrize("distance", [scenes.APPROACH_M, scenes.STAGING_M])
+def test_the_footprint_alone_finds_the_ridge(distance):
+    """The corridor does not need the joint reading, only the columns.
+
+    `tine_footprint` knows where the tines are ACROSS the truck and how
+    far they reach, which is all the corridor has to exclude. That is
+    why the ridge is caught with no mast reading at all.
+    """
+    frame, _scene = scenes.ridge(distance)
+    assert classify(frame) == "stringer_in_path"
+
+
+@pytest.mark.parametrize("distance", [scenes.STAGING_M, scenes.APPROACH_M,
+                                      scenes.CLOSE_M])
+def test_a_clean_pallet_has_a_clear_corridor(distance):
+    """The corridor must not invent an obstruction out of clean floor."""
+    frame, _scene = scenes.clean(distance)
+    assert classify(frame, self_mask=_fresh_mask(frame)) is None
+
+
+@pytest.mark.parametrize("distance", [scenes.APPROACH_M, scenes.CLOSE_M])
+def test_the_trucks_own_tines_are_not_an_obstruction_in_the_corridor(distance):
+    """A fork in the fork path is a fork, and the mask is what says so."""
+    frame, _scene = scenes.forks(distance)
+    assert classify(frame, self_mask=_fresh_mask(frame)) is None

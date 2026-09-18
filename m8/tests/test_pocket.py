@@ -203,3 +203,127 @@ def test_the_face_is_a_large_share_of_what_was_fitted(distance):
     assert obs is not None
     assert obs.inlier_frac >= pocket.FACE_INLIER_FRAC_MIN
     assert obs.inlier_frac > 0.20, "back in E1's failure regime"
+
+
+# --------------------------------------------- step 3: the occluder-aware share
+# `EVIDENCE_M8_E3_WORDS.md` step 3 was gated on a plant-measured step 2
+# and left NOT DONE. Step 2 is measured (`e3-20260912-184020`,
+# `e3-20260912-190415`). What the measurement then showed, and what
+# these tests defend:
+#
+# The share gate asks whether the fitted face is a large share of what
+# was fitted. When the truck's own tines reach toward the pallet the
+# seed mode is still THE FACE - measured on the rendered close poses,
+# the face bin holds 109 of 850 candidate points at 1.0 m while the
+# tines spread a ramp of 635 across every bin in front of it. The face
+# is not a small share of what could have been the face; it is a small
+# share of A DIFFERENT SURFACE STANDING IN FRONT OF IT. A point nearer
+# than the seed band was never a candidate for being part of the seeded
+# plane, so it is not in the denominator that judges it.
+#
+# The same points also walked the TRIM off the face: at 0.90 m and
+# closer the three trim passes reached into the tine ramp and the plane
+# tilted until it read `candidate_falls_away_like_a_floor`, which the
+# word policy treats as evidence of an empty bay.
+#
+# NO THRESHOLD MOVES. The occluder is "nearer than the seed band", and
+# `FACE_SEED_BAND_M` is the band that already defines what the seeded
+# surface is.
+def _fit_trace(frame, self_mask=None):
+    trace = {}
+    seg = pocket.segment(frame, trace=trace, self_mask=self_mask)
+    return seg, trace
+
+
+def test_the_forks_leave_the_share_denominator_and_the_face_is_found():
+    """The tines are in front of the face, so they do not judge it."""
+    frame, _scene = scenes.forks(1.0)
+    seg, trace = _fit_trace(frame)
+    assert trace["occluder_points"] > 0
+    assert trace["share_denominator"] < trace["after_deck_cut"]
+    assert seg is not None, trace.get("refused")
+    assert trace["inlier_frac"] > 0.9
+
+
+@pytest.mark.parametrize("distance", [0.9, 0.8, 0.711])
+def test_inside_the_tines_reach_the_occluder_rule_runs_out(distance):
+    """Where step 3 stops, measured, and what has to take over.
+
+    An occluder is something IN FRONT of the face, and the rule finds
+    one here - 347 to 550 points of the blob leave the denominator. It
+    is not enough. Closer than about 0.90 m the tines are no longer only
+    in front of the pallet: they are INSIDE it, which is the whole point
+    of a fork, and the part of a tine near its tip sits at the FACE'S
+    OWN horizontal distance, inside the seed band. Removing what is in
+    front leaves that part behind, the three trim passes reach it, the
+    plane tilts, and the candidate reads
+    `candidate_falls_away_like_a_floor`.
+
+    This is not a gap to widen the occluder rule into - widening the
+    band is how a geometry constant stops meaning what it says. It is
+    what `selfmask.tine_footprint` is for: LATERAL is the one thing that
+    still separates a tine from a pallet at this range, and the two
+    lateral bands are bolted to the truck.
+    """
+    frame, _scene = scenes.forks(distance)
+    seg, trace = _fit_trace(frame)
+    assert trace["occluder_points"] > 0
+    assert seg is None
+    assert trace["refused"] == "candidate_falls_away_like_a_floor"
+
+
+def test_an_empty_bay_has_nothing_in_front_and_keeps_its_denominator():
+    """The discriminator is physical, not fitted.
+
+    With the bay empty the tines are the nearest thing in the frame and
+    the seed mode lands on their near end, so there is nothing in front
+    of the seed at all and the denominator is untouched. That is why
+    `forks_empty_bay` keeps saying `pallet_absent` while `forks` stops:
+    the difference between them is whether anything stands BEHIND the
+    obstruction, and the frame answers that on its own.
+    """
+    frame, _scene = scenes.forks_empty_bay(0.8)
+    _seg, trace = _fit_trace(frame)
+    assert trace["occluder_points"] == 0
+    assert trace["share_denominator"] == trace["after_deck_cut"]
+
+
+def test_the_occluder_is_kept_when_too_little_would_be_left():
+    """Removing points is only allowed while a fit still has a face.
+
+    A candidate whose seeded surface is thinner than `MIN_FACE_POINTS`
+    once the occluder is gone is not a face measured behind an occluder;
+    it is too little to measure, and the gates that said so before must
+    still be the ones that say so. This is a guard, not a regime: no
+    fixture here trips it, and the denominator never drops below the
+    bar the final inlier set is held to.
+    """
+    for frame, _scene in (scenes.clean(scenes.STAGING_M),
+                          scenes.clean(scenes.CLOSE_M),
+                          scenes.forks(0.8),
+                          scenes.forks_empty_bay(0.8)):
+        _seg, trace = _fit_trace(frame)
+        assert trace["share_denominator"] >= pocket.MIN_FACE_POINTS
+
+
+def test_an_occluder_inside_the_seed_band_is_not_removed():
+    """Open item 2 stays open, and this test is what keeps it honest.
+
+    `EVIDENCE_M8_E3_WORDS.md` open item 2 established the cause of
+    `blocked_by_box` reading `pallet_absent`: the staged box stands
+    0.06 m in front of the face and `FACE_SEED_BAND_M` is 0.06 m, so the
+    box is inside the seed band by one millimetre of margin. The
+    occluder rule is defined BY that band - nearer than the seed band -
+    so it does not reach the box, and this frame is refused exactly as
+    it was before. Widening the rule to catch it would be tuning a
+    geometry constant onto a staged fault; the fix named in that file is
+    a threshold move and it is still out of scope.
+    """
+    frame, _scene = scenes.blocked_by_box(scenes.CLOSE_M)
+    seg, trace = _fit_trace(frame)
+    # The box's own near edge does poke past the band - 10 points of
+    # 296 - and removing them changes nothing, because the surface that
+    # tilts the fit is the part of the box INSIDE the band.
+    assert trace["occluder_points"] < 0.05 * trace["after_deck_cut"]
+    assert seg is None
+    assert trace["refused"] == "candidate_falls_away_like_a_floor"
